@@ -1,8 +1,10 @@
 import asyncio
 
+host = '127.0.0.1'
+port = 5150
 
 class EchoServerProtocol(asyncio.Protocol):
-
+    
     connections = { 'test_peername' : "somedata"}
 
     def connection_made(self, transport):
@@ -32,6 +34,8 @@ class EchoServerProtocol(asyncio.Protocol):
             reply = "Hellóbelló..."
         if(message == "Viszlát"):
             reply = "A viszont látásra kedves Kliens."
+        else:
+            reply="Ok."
 
         print('Send: {!r}'.format(reply))
         self.transport.write(reply.encode("utf_8"))
@@ -51,7 +55,7 @@ async def main():
 
     server = await loop.create_server(
         lambda: EchoServerProtocol(),
-        '127.0.0.1', 8888)
+        host, port)
 
     async with server:
         await server.serve_forever()
