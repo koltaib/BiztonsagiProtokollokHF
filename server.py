@@ -1,51 +1,129 @@
 import asyncio
+from comprot import ComProt
+from rsa_key_gen import ServerRSA
+
+from Crypto import Random
+from Crypto.Hash import SHA256
+from Crypto.Cipher import AES, PKCS1_OAEP
 
 host = '127.0.0.1'
 port = 5150
+CP = ComProt()
+pubkey_file_path = "priv_key.txt"
 
 class EchoServerProtocol(asyncio.Protocol):
-    
-    connections = { 'test_peername' : "somedata"}
+    rsakey = 0
+    key = 0
+    connections = { 'peername' : "..."}
+
+    def __init__(self):
+        self.rsakey = ServerRSA.load_keypair(pubkey_file_path)
+
 
     def connection_made(self, transport):
         peername = transport.get_extra_info('peername')
         print('Connection from {}'.format(peername))
         self.transport = transport
 
-    def data_received(self, data):
-        message = data.decode()
-        print('Data received: {!r}'.format(message))
-        reply = ""
-        if(message == "pwd"):
+    def handle_command(cmd):
+        if(cmd == "pwd"):
             reply = "current working directory..."
-        if(message == "lst"):
+        if(cmd == "lst"):
             reply = "List content of the current working directory..."
-        if(message == "chd"):
+        if(cmd == "chd"):
             reply = "Change directory..."
-        if(message == "mkd"):
+        if(cmd == "mkd"):
             reply = "Make directory..."
-        if(message == "del"):
+        if(cmd == "del"):
             reply = "Delete file..."
-        if(message == "upl"):
+        if(cmd == "upl"):
             reply = "Upload file..."
-        if(message == "dnl"):
+        if(cmd == "dnl"):
             reply = "Download file..."
-        if(message == "Heló"):
+        if(cmd == "Heló"):
             reply = "Hellóbelló..."
-        if(message == "Viszlát"):
+        if(cmd == "Viszlát"):
             reply = "A viszont látásra kedves Kliens."
         else:
             reply="Ok."
 
-        print('Send: {!r}'.format(reply))
-        self.transport.write(reply.encode("utf_8"))
+    def handle_login(self, message):
+        print(self.decode_data(message))
 
-        host,port = self.transport.get_extra_info('peername')
-        self.transport.write(host.encode("utf_8"))
-        self.transport.write(str(port).encode("utf_8"))
+    def decode_data(self, message):
+        #message is an array, each element is an information of the message
+        #------ message = (typeString, sequenceNumber, rnd, encPayload, mac, etk)
+        #------ if not login request, etk is just an empty string
+        typ = message[0]
+        sqn = message[1]
+        rnd = message[2]
+        enc_payload = message[3]
+        mac = message[4]
+        etk = message[5]
 
-        #print('Close the client socket')
-        #self.transport.close()
+        #In case of login, we do not have a key yet, data is encrypted with rsa
+        if typ == "loginReq":
+            RSA_cipher = PKCS1_OAEP.new(self.rsakey)
+            try:
+                aes_key = RSA_cipher.decrypt(etk)
+            except Exception as e:
+                print("Decryption failed, message not processed: \n {}".format(e))
+                return None
+            self.key = aes_key
+        #Otherwise we use stored key
+        else:
+            aes_key = self.key
+
+        nonce = sqn.to_bytes(2,'big') + rnd.to_bytes(6,'big')
+        AE = AES.new(aes_key, AES.MODE_GCM, nonce=nonce, mac_len=12)
+        try:
+            payload = AE.decrypt_and_verify(enc_payload, mac)
+        except Exception as e:
+            print("Decryption failed, message not processed")
+            return None
+
+        return payload
+
+    def data_received(self, data):
+
+        info, message = CP.processMessage(data)
+        #message is an array, each element is an information of the message
+        #------ message = (typeString, sequenceNumber, rnd, encPayload, mac, etk)
+        #------ if not login request, etk is just an empty string
+
+        #Check if message could be processed
+        if info != "failed":
+
+            reply = "Je ne sais pas"
+
+            #Check message type, and handle message accordingly
+            typ = message[0]
+            if typ == 'loginReq':
+                self.handle_login(message)
+            if typ == 'commandReq':
+                self.handle_command() #...
+            if 'uploadReq' in typ:
+                self.handle_upl()
+            if 'dnloadReq' in typ:
+                self.handle_dnl()
+
+            #print('Data received: {!r}'.format(message))
+                
+
+            print('Send: {!r}'.format(reply))
+            self.transport.write(reply.encode("utf_8"))
+
+            host,port = self.transport.get_extra_info('peername')
+            self.transport.write(host.encode("utf_8"))
+            self.transport.write(str(port).encode("utf_8"))
+
+            #print('Close the client socket')
+            #self.transport.close()
+        else:
+            print("Message dropped")
+            print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", message, "\n---------------------\n")
+        
+        
 
 
 async def main():

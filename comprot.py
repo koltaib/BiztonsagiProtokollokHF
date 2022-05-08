@@ -1,8 +1,4 @@
 
-
-from inspect import getfile
-
-
 class ComProt():
 
     HeaderFields = {
@@ -38,9 +34,10 @@ class ComProt():
         #Checking message length
         ln = message[4:6]
         if len(message).to_bytes(2,'big') != ln:
-            print("Lengths don't match: ", ln, len(message))
-            print("Message not processed")
-            return ("failed","")
+            print("\n FAILED MESSAGE PROCESS")
+            print("----- Lengths don't match: ", ln, len(message))
+            print("----- Message not processed")
+            #return ("failed","")
 
         #Gettig version number from message
         versionNum = message[:2]
@@ -49,13 +46,14 @@ class ComProt():
         typ_bytes = message[2:4]
         typ = self.getfield(typ_bytes)
         if typ == "":
-            print("Message not processed")
+            print("\n FAILED MESSAGE PROCESS")
+            print("----- Message not processed")
             return("failed", "")
         
         #Getting sequence number, random number and reserved
         sqn = int.from_bytes(message[6:8], "big")
-        rnd = int.from_bytes(message[8:10], "big")
-        rsv = int.from_bytes(message[10:12], "big")
+        rnd = int.from_bytes(message[8:14], "big")
+        rsv = int.from_bytes(message[14:16], "big")
 
         #Getting the rest of the message
         #------if it is a login request, rest is enc_payload + mac + etk
@@ -64,10 +62,15 @@ class ComProt():
         etk=b''
         mac=b''
         enc_payload =b''
+        if len(rest) < 268:
+            print()
+            print("NOT GOOD NOT OKE SOMETHING IS OFF", rest)
+            print()
+
         if typ == "loginReq":
-            etk = rest[-32:]
-            mac = rest[-44:-32]
-            enc_payload = rest[:-44]
+            etk = rest[-256:]
+            mac = rest[-268:-256]
+            enc_payload = rest[:-268]
         else:
             mac = rest[-12:]
             enc_payload = rest[:-12]
@@ -91,16 +94,23 @@ class ComProt():
         #message is an array, each element is an information of the message
         #------ message = (typeString, sequenceNumber, rnd, encPayload, mac, etk)
         #------ if not login request, etk is just an empty string
-        typ = self.HeaderFields[message[0]]
+        #------ if not in Header Fields, message can not be sent, return with failed
+        typ = self.HeaderFields.get(message[0], 'Not found')
+        if typ == "Not found":
+            print("\n FAILED MESSAGE PREPARE")
+            print("----- Couldn't find in Header Field: ", message[0])
+            print("----- Message not processed")
+            return("failed", "")
+
         sqn = message[1]
         rnd = message[2]
         enc_payload = message[3]
         mac = message[4]
         l = 16 + len(enc_payload) + 12
 
-        if typ == "loginReq":
+        if message[0] == "loginReq":
             etk = message[5]
-            l += 32
+            l += 256
         
         prepared_message = self.HeaderFields["versionNumber"]
         prepared_message += typ
@@ -111,7 +121,7 @@ class ComProt():
         prepared_message += enc_payload
         prepared_message += mac
 
-        if typ == "loginReq":
+        if message[0] == "loginReq":
             prepared_message += etk
 
         return ("success", prepared_message)
