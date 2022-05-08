@@ -1,17 +1,19 @@
 import asyncio
 from comprot import ComProt
+from encrypt import Encrypter
 from rsa_key_gen import ServerRSA
-
+import numpy as np
 from Crypto import Random
 from Crypto.Hash import SHA256
 from Crypto.Cipher import AES, PKCS1_OAEP
+from Crypto.Protocol.KDF import HKDF
 
 host = '127.0.0.1'
 port = 5150
 CP = ComProt()
 pubkey_file_path = "priv_key.txt"
 
-class EchoServerProtocol(asyncio.Protocol):
+class EchoServerProtocol(asyncio.Protocol, Encrypter):
     rsakey = 0
     key = 0
     connections = { 'peername' : "..."}
@@ -53,54 +55,49 @@ class EchoServerProtocol(asyncio.Protocol):
         print(payload)
 
         #TODO: check if timestamp and password are valid
-        
+
         #Login Response
-        rnd = message[2]
+        client_rnd = message[2]
+        rn = np.random.bytes(6)
+        server_rnd = int.from_bytes(rn, "big")
+        sequenceNumber = message[1]
+        nonce = sequenceNumber.to_bytes(2,'big') + rn
         #Generating hashed login request with rnd we got from client
         hash = SHA256.new()
-        hash.update(payload.encode("utf-8"))
-        self.login_hash = hash.hexdigest()
-        self.random_number = rnd
+        hash.update(payload)
+        request_hash = hash.hexdigest()
+        
+        payload = request_hash + "\n"
+        payload += str(rn.hex())
+
+        encPayload, mac, etk = self.encode_payload("", payload, nonce) #TODO: a server amikor elkódol egy payload-ot akkor a saját randomját használja a nonce-ban?
+        #setting new key from client random and server random
+        self.key = HKDF(bytes.fromhex(client_rnd.to_bytes(6,'big').hex() + rn.hex()), 32, request_hash.encode("utf-8"), SHA256, 1) # rquest_hash will be salt
+        #print("DEV _ final key: ", self.key)
+        info, prepared_message = CP.prepareMessage(("loginRes", sequenceNumber, server_rnd, encPayload, mac, etk))
+
+        if info != "failed":
+            #print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", preparedMessage, "\n---------------------\n")
+            self.transport.write(prepared_message)
+        else:
+            print("Message dropped")
+            print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", prepared_message, "\n---------------------\n")
+        
+        return
+
+    async def send_message(self, data):
+
+        self.transport.write(data)
+
+        await asyncio.sleep(0.1)
     
     def handle_command(self,message):
         payload = self.decode_data(message)
         print("Received this command: ", payload)
         return
 
-    def decode_data(self, message):
-        #message is an array, each element is an information of the message
-        #------ message = (typeString, sequenceNumber, rnd, encPayload, mac, etk)
-        #------ if not login request, etk is just an empty string
-        typ = message[0]
-        sqn = message[1]
-        rnd = message[2]
-        enc_payload = message[3]
-        mac = message[4]
-        etk = message[5]
-
-        #In case of login, we do not have a key yet, data is encrypted with rsa
-        if typ == "loginReq":
-            RSA_cipher = PKCS1_OAEP.new(self.rsakey)
-            try:
-                aes_key = RSA_cipher.decrypt(etk)
-            except Exception as e:
-                print("Decryption failed, message not processed: \n {}".format(e))
-                return None
-            self.key = aes_key
-        #Otherwise we use stored key
-        else:
-            aes_key = self.key
-    	
-        #Decrypt payload
-        nonce = sqn.to_bytes(2,'big') + rnd.to_bytes(6,'big')
-        AE = AES.new(aes_key, AES.MODE_GCM, nonce=nonce, mac_len=12)
-        try:
-            payload = AE.decrypt_and_verify(enc_payload, mac)
-        except Exception as e:
-            print("Decryption failed, message not processed: \n {}".format(e))
-            return None
-
-        return payload
+    #----In Encrypter class
+    #def decode_data(self, message)
 
     def data_received(self, data):
 
@@ -112,30 +109,33 @@ class EchoServerProtocol(asyncio.Protocol):
         #Check if message could be processed
         if info != "failed":
 
-            reply = "Je ne sais pas"
+            
 
             #Check message type, and handle message accordingly
             typ = message[0]
             if typ == 'loginReq':
                 self.handle_login(message)
+                return
             if typ == 'commandReq':
                 self.handle_command(message) #...
+                return
             if 'uploadReq' in typ:
                 self.handle_upl()
+                return
             if 'dnloadReq' in typ:
                 self.handle_dnl()
+                return
+            else:
+                reply = "Je ne sais pas"
+                print('Send: {!r}'.format(reply))
+                self.transport.write(reply.encode("utf_8"))
 
-                
+                host,port = self.transport.get_extra_info('peername')
+                #self.transport.write(host.encode("utf_8"))
+                #self.transport.write(str(port).encode("utf_8"))
 
-            print('Send: {!r}'.format(reply))
-            self.transport.write(reply.encode("utf_8"))
-
-            host,port = self.transport.get_extra_info('peername')
-            #self.transport.write(host.encode("utf_8"))
-            #self.transport.write(str(port).encode("utf_8"))
-
-            #print('Close the client socket')
-            #self.transport.close()
+                #print('Close the client socket')
+                #self.transport.close()
         else:
             print("Message dropped")
             print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", message, "\n---------------------\n")

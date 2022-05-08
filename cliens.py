@@ -1,8 +1,10 @@
 import asyncio
+from http import server
 
 from aioconsole import ainput
 
 from comprot import ComProt
+from encrypt import Encrypter
 from rsa_key_gen import ServerRSA
 
 import time
@@ -11,13 +13,14 @@ import numpy as np
 from Crypto import Random
 from Crypto.Hash import SHA256
 from Crypto.Cipher import AES, PKCS1_OAEP
+from Crypto.Protocol.KDF import HKDF
 
 host = '127.0.0.1'
 port = 5150
 CP = ComProt()
 pubkey_file_path = "server_pub_key.txt"
 
-class EchoClientProtocol(asyncio.Protocol):
+class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
     sequence_number = 0
     random_number = 0
@@ -32,25 +35,8 @@ class EchoClientProtocol(asyncio.Protocol):
 
         self.loop = loop
     
-    def encode_payload(self, typ, payload, nonce, rnd):
-
-        #Encrypting payload
-        self.key = Random.get_random_bytes(32)
-        AES_key = self.key
-        AE = AES.new(AES_key, AES.MODE_GCM, nonce=nonce, mac_len=12)
-        encr_data, authtag = AE.encrypt_and_digest(payload.encode("utf-8"))
-        
-        #Encrypt login request with RSA
-        encr_tk = "" # defult is an empty string (won't be processed)
-        #In case of login, we do not have a key yet, data is encrypted with rsa
-        if typ == "loginReq":
-            RSAcipher = PKCS1_OAEP.new(self.rsakey)
-            encr_tk = RSAcipher.encrypt(self.key)
-        #Otherwise we use stored key
-        else:
-            aes_key = self.key
-
-        return encr_data, authtag, encr_tk
+    #----- In Encrypter class
+    #def encode_payload(self, typ, payload, nonce, rnd)
 
     def login(self):
         print("----- Log in -----")
@@ -75,7 +61,8 @@ class EchoClientProtocol(asyncio.Protocol):
         self.random_number = rnd
 
         #encode payload
-        encr_data, authtag, encr_tk = self.encode_payload("loginReq", payload, nonce, rnd)
+        self.key = Random.get_random_bytes(32)
+        encr_data, authtag, encr_tk = self.encode_payload("loginReq", payload, nonce)
 
         info, preparedMessage = CP.prepareMessage(("loginReq", self.sequence_number, int.from_bytes(rnd, "big"), encr_data, authtag, encr_tk))
 
@@ -86,6 +73,7 @@ class EchoClientProtocol(asyncio.Protocol):
             print("Message dropped")
             print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", preparedMessage, "\n---------------------\n")
         
+        #TODO: next reply should be login response, else connection close
         return
     
     def process_command_input(self,typ,command, params):
@@ -141,11 +129,46 @@ class EchoClientProtocol(asyncio.Protocol):
         await asyncio.sleep(0.1)
 
 
+    def handle_login_response(self,processed_message):
+        payload = self.decode_data(processed_message)
+        hash_and_server_rnd = payload.decode("utf-8").split('\n')
+        received_loginReqHash = hash_and_server_rnd[0]
+        server_rnd = hash_and_server_rnd[1]
+        if (self.login_hash != received_loginReqHash):
+            print("\n Received and stored login request hash do not match")
+            print(self.login_hash)
+            print(received_loginReqHash)
+            print("Message dropped.")
+        else:
+            print("Login successful")
+            #setting new key from client random and server random
+            self.key = HKDF(bytes.fromhex(hex(int.from_bytes(self.random_number, "big"))[2:] + server_rnd), 32, received_loginReqHash.encode("utf-8"), SHA256, 1) # rquest_hash will be salt
+            #print("final key: ", self.key)
 
 
-    def data_received(self, data):
-
-        print('Data received: {!r}'.format(data.decode()))
+    def data_received(self, message):
+        
+        #If first 2 bytes are not the communication protocol version number, we don't process it, but print it for debug
+        if message[:2] != CP.versionNumber:
+            print("Received not valid reply:")
+            print(message)
+        
+        #processing valid message
+        else:
+            #process message
+            info, processed_message = CP.processMessage(message)
+            if info != "failed":
+                if processed_message[0] == 'loginRes':
+                    self.handle_login_response(processed_message)
+                else:
+                    print("Received this reply:")
+                    payload = self.decode_data(processed_message)
+                    print(payload)
+            #if process failed
+            else:
+                print("Message dropped")
+                print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", processed_message, "\n---------------------\n")
+        
 
 
 
