@@ -1,11 +1,10 @@
 
 class ComProt():
 
-    HeaderFields = {
+    versionNumber = b'\x01\x00'
 
+    HeaderFields = {
         #-----MTP Protocol--------
-        #Version Number-----------
-        "versionNumber" : b'\x01\x00',
         #Message Type-------------
         "loginReq" : b'\x00\x00',
         "loginRes" : b'\x00\x10',
@@ -62,7 +61,7 @@ class ComProt():
         etk=b''
         mac=b''
         enc_payload =b''
-        if len(rest) < 268:
+        if typ == "loginReq" and len(rest) < 268:
             print()
             print("NOT GOOD NOT OKE SOMETHING IS OFF", rest)
             print()
@@ -112,7 +111,7 @@ class ComProt():
             etk = message[5]
             l += 256
         
-        prepared_message = self.HeaderFields["versionNumber"]
+        prepared_message = self.versionNumber
         prepared_message += typ
         prepared_message += l.to_bytes(2, 'big')
         prepared_message += sqn.to_bytes(2,'big')

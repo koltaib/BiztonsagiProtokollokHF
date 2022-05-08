@@ -48,7 +48,24 @@ class EchoServerProtocol(asyncio.Protocol):
             reply="Ok."
 
     def handle_login(self, message):
-        print(self.decode_data(message))
+        print("Received this login payload:")
+        payload = self.decode_data(message)
+        print(payload)
+
+        #TODO: check if timestamp and password are valid
+        
+        #Login Response
+        rnd = message[2]
+        #Generating hashed login request with rnd we got from client
+        hash = SHA256.new()
+        hash.update(payload.encode("utf-8"))
+        self.login_hash = hash.hexdigest()
+        self.random_number = rnd
+    
+    def handle_command(self,message):
+        payload = self.decode_data(message)
+        print("Received this command: ", payload)
+        return
 
     def decode_data(self, message):
         #message is an array, each element is an information of the message
@@ -73,13 +90,14 @@ class EchoServerProtocol(asyncio.Protocol):
         #Otherwise we use stored key
         else:
             aes_key = self.key
-
+    	
+        #Decrypt payload
         nonce = sqn.to_bytes(2,'big') + rnd.to_bytes(6,'big')
         AE = AES.new(aes_key, AES.MODE_GCM, nonce=nonce, mac_len=12)
         try:
             payload = AE.decrypt_and_verify(enc_payload, mac)
         except Exception as e:
-            print("Decryption failed, message not processed")
+            print("Decryption failed, message not processed: \n {}".format(e))
             return None
 
         return payload
@@ -101,21 +119,20 @@ class EchoServerProtocol(asyncio.Protocol):
             if typ == 'loginReq':
                 self.handle_login(message)
             if typ == 'commandReq':
-                self.handle_command() #...
+                self.handle_command(message) #...
             if 'uploadReq' in typ:
                 self.handle_upl()
             if 'dnloadReq' in typ:
                 self.handle_dnl()
 
-            #print('Data received: {!r}'.format(message))
                 
 
             print('Send: {!r}'.format(reply))
             self.transport.write(reply.encode("utf_8"))
 
             host,port = self.transport.get_extra_info('peername')
-            self.transport.write(host.encode("utf_8"))
-            self.transport.write(str(port).encode("utf_8"))
+            #self.transport.write(host.encode("utf_8"))
+            #self.transport.write(str(port).encode("utf_8"))
 
             #print('Close the client socket')
             #self.transport.close()
