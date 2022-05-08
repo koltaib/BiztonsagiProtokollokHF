@@ -50,9 +50,14 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
             reply="Ok."
 
     def handle_login(self, message):
-        print("Received this login payload:")
+        
         payload = self.decode_data(message)
-        print(payload)
+        splits = payload.decode("utf-8").split("\n")
+        timestamp = splits[0]
+        username = splits[1]
+        password = splits[2]
+        #client random not retrieved from splits, because it has been processed before and can be found in message[2]
+        print("Received this login credentials: ",username, " ", password)
 
         #TODO: check if timestamp and password are valid
 

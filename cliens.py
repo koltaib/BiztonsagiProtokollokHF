@@ -83,20 +83,23 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
         nonce = self.sequence_number.to_bytes(2, 'big') + rnd
         
         #Generating payload from command and params
-        payload = command + "\n"
-        for param in params:
-            payload += param + "\n"
-        payload = payload[:-2] #last \n deleted
+        payload = command 
+        #if there are params, append to payload
+        if len(params) != 0:
+            payload += "\n"
+            for param in params:
+                payload += param + "\n"
+            payload = payload[:-2] #last \n deleted
 
         #encode payload
-        encr_data, authtag, encr_tk = self.encode_payload(typ, payload, nonce, rnd)
+        encr_data, authtag, encr_tk = self.encode_payload(typ, payload, nonce)
 
         #Prepare message to send in the used protocol
         info, preparedMessage = CP.prepareMessage((typ, self.sequence_number, int.from_bytes(rnd, "big"), encr_data, authtag, encr_tk))
 
         return (info, preparedMessage)
 
-    def processInput(self,cmd):
+    def preprocessInput(self,cmd):
         if(cmd == "pwd"):
             return "commandReq"
         if(cmd == "lst"):
@@ -185,21 +188,30 @@ async def monitor_input(client: EchoClientProtocol):
 
     while True:
         if client.login:
-            data = await ainput("> ")
-            command_type = client.processInput(data)
 
+            #wait for user iput
+            data = await ainput("> ")
+
+            #preprocess user input to see if it is a valid input
+            command_type = client.preprocessInput(data)
+
+            #if not know, print warning, wait for next input
             if command_type == 'Not found':
                 print("Command not valid")
+
+            #valid input
             else:
+
+                #user will type input command and params separated with a space
                 command_params = data.split(" ")
                 command = command_params[0]
-                params = command_params[1:]
-                info, preparedMesage = client.process_command_input(command_type,command,params)
-                #message is an array, each element is an information of the message
-                #------ message = (typeString, sequenceNumber, rnd, encPayload, mac, etk)
-                #------ if not login request, etk is just an empty string
+                params = []
+                #if input command has params, pass that as well
+                if len(command_params) > 1:
+                    params = command_params[1:]
 
-                print("Prepared Message: ", info)
+                info, preparedMesage = client.process_command_input(command_type,command,params)
+                #print("Prepared Message: ", info)
                 
                 await client.send_message(preparedMesage)
 
