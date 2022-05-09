@@ -7,6 +7,8 @@ from Crypto import Random
 from Crypto.Hash import SHA256
 from Crypto.Cipher import AES, PKCS1_OAEP
 from Crypto.Protocol.KDF import HKDF
+import scrypt
+import time
 
 import os
 import math
@@ -20,6 +22,7 @@ SERVER_HOME = os.getcwd()
 pubkey_file_path = "priv_key.txt"
 
 class EchoServerProtocol(asyncio.Protocol, Encrypter):
+    time_window = 2e9
     rsakey = 0
     key = 0
 
@@ -28,8 +31,67 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     upload_cache = {}
     download_cache = {}
 
+    #Connections is a dictionary, storing every userdata, like that:
+    #'username' : ("peername", "hashed password", "random salt")
+    #------ username: is the login username, it is the key because it doesn't change
+    #------ peername: host + port of client, it changes by every active connection
+    #------ hashed password: only hashed passwords are stores, and their salt
+    #------ random salt: for every password, a random number is generated as salt, stored for authentication
+
+    connections = { 'alice' : (0, 0, 0), 'bob' : (0,0,0), 'charlie' : (0,0,0)}
+
     def __init__(self):
         self.rsakey = ServerRSA.load_keypair(pubkey_file_path)
+
+        #Sign up default users
+        self.signup("alice", "aaa")
+        self.signup("bob", "bbb")
+        self.signup("charlie", "ccc")        
+
+    #Password hash method implemented in Server (and not in Encrypter) because we don't want Client to know which hash method we use
+    def signup(self, username, password):
+
+        #For every password, a random number is generated for salt, and stored with password hash as well
+        #lenght of random salt is equal to length of password, but minimum 8
+        l = 8 if len(password) < 8 else len(password) 
+        random_salt = Random.get_random_bytes(l)
+
+        #Hash password with random salt
+        hashed_password = scrypt.hash(password, random_salt)
+
+        #Store random salt and hashed password in connections dictionary
+        self.connections[username] = ("", hashed_password, random_salt)
+        return
+
+    def check_password(self, username, password):
+
+        #Check if user exists
+        if self.connections.get(username, 'Not found') == 'Not found':
+            return False
+        else:
+            #Get stored userdata
+            userdata = self.connections[username]
+
+            #Get stored salt and hash received password with it
+            salt = userdata[2]
+            #Hash password with stored salt
+            hashed_password = scrypt.hash(password, salt)
+
+            #Compare with stored hashed password
+            stored_hashed_password = userdata[1]
+
+            if hashed_password != stored_hashed_password:
+                #Password OK
+                return False
+            else:
+                return True
+
+    def check_timestamp(self, timestamp):
+        server_timestamp = time.time_ns()
+        if server_timestamp - self.time_window/2 < timestamp < server_timestamp + self.time_window/2:
+            return True
+        else:
+            return False
 
 
     def connection_made(self, transport):
@@ -204,6 +266,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         password_success = self.check_password(username, password)
         timestamp_success = self.check_timestamp(int(timestamp)) #timestamp received as string
         if not password_success or not timestamp_success:
+            print("asdf")
             return "failed"
 
         #Login Response

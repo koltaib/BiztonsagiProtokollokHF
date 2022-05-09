@@ -285,7 +285,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
                             f = open(f'{os.getcwd()}/{self.requested_file_name}', "wb")
                             f.write(self.download_cache)
                             f.close()
-                           self.download_cache = b''  
+                            self.download_cache = b''  
                     else:
                         print("Received this reply:")
                         payload = self.decode_data(processed_message)
