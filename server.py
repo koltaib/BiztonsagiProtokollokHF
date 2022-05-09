@@ -7,6 +7,8 @@ from Crypto import Random
 from Crypto.Hash import SHA256
 from Crypto.Cipher import AES, PKCS1_OAEP
 from Crypto.Protocol.KDF import HKDF
+import scrypt
+import time
 
 import os
 
@@ -20,13 +22,75 @@ SERVER_HOME = os.getcwd()
 pubkey_file_path = "priv_key.txt"
 
 class EchoServerProtocol(asyncio.Protocol, Encrypter):
+    time_window = 2e9 # 2 seconds in nanosecond, used to check timestamps
     rsakey = 0
     key = 0
-    connections = { 'peername' : "..."}
+
     upload_cache = {}
 
+    #Connections is a dictionary, storing every userdata, like that:
+    #'username' : ("peername", "hashed password", "random salt")
+    #------ username: is the login username, it is the key because it doesn't change
+    #------ peername: host + port of client, it changes by every active connection
+    #------ hashed password: only hashed passwords are stores, and their salt
+    #------ random salt: for every password, a random number is generated as salt, stored for authentication
+
+    connections = { 'alice' : (0, 0, 0), 'bob' : (0,0,0), 'charlie' : (0,0,0)}
+
     def __init__(self):
+
+        #Load stored RSA PRIVATE (!) key
         self.rsakey = ServerRSA.load_keypair(pubkey_file_path)
+
+        #Sign up default users
+        self.signup("alice", "aaa")
+        self.signup("bob", "bbb")
+        self.signup("charlie", "ccc")
+
+    #Password hash method implemented in Server (and not in Encrypter) because we don't want Client to know which hash method we use
+    def signup(self, username, password):
+        
+        #For every password, a random number is generated for salt, and stored with password hash as well
+        #lenght of random salt is equal to length of password, but minimum 8
+        l = 8 if len(password) < 8 else len(password) 
+        random_salt = Random.get_random_bytes(l)
+
+        #Hash password with random salt
+        hashed_password = scrypt.hash(password, random_salt)
+
+        #Store random salt and hashed password in connections dictionary
+        self.connections[username] = ("", hashed_password, random_salt)
+        return
+    
+    def check_password(self, username, password):
+
+        #Check if user exists
+        if self.connections.get(username, 'Not found') == 'Not found':
+            return False
+        else:
+            #Get stored userdata
+            userdata = self.connections[username]
+
+            #Get stored salt and hash received password with it
+            salt = userdata[2]
+            #Hash password with stored salt
+            hashed_password = scrypt.hash(password, salt)
+
+            #Compare with stored hashed password
+            stored_hashed_password = userdata[1]
+
+            if hashed_password != stored_hashed_password:
+                #Password OK
+                return False
+            else:
+                return True
+
+    def check_timestamp(self, timestamp):
+        server_timestamp = time.time_ns()
+        if server_timestamp - self.time_window/2 < timestamp < server_timestamp + self.time_window/2:
+            return True
+        else:
+            return False
 
 
     def connection_made(self, transport):
@@ -153,6 +217,10 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         print("Received this login credentials: ",username, " ", password)
 
         #TODO: check if timestamp and password are valid
+        password_success = self.check_password(username, password)
+        timestamp_success = self.check_timestamp(int(timestamp)) #timestamp received as string
+        if not password_success or not timestamp_success:
+            return "failed"
 
         #Login Response
         client_rnd = message[2]
@@ -168,7 +236,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         payload = request_hash + "\n"
         payload += str(rn.hex())
 
-        encPayload, mac, etk = self.encode_payload("", payload, nonce) #TODO: a server amikor elkódol egy payload-ot akkor a saját randomját használja a nonce-ban?
+        encPayload, mac, etk = self.encode_payload("", payload, nonce)
         #setting new key from client random and server random
         self.key = HKDF(bytes.fromhex(client_rnd.to_bytes(6,'big').hex() + rn.hex()), 32, request_hash.encode("utf-8"), SHA256, 1) # rquest_hash will be salt
         #print("DEV _ final key: ", self.key)
@@ -223,34 +291,35 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         #Check if message could be processed
         if info != "failed":
 
-            
-
             #Check message type, and handle message accordingly
             typ = message[0]
+
+            #Login
             if typ == 'loginReq':
-                self.handle_login(message)
+                handle_result = self.handle_login(message)
+                #If login failed, close connection
+                if handle_result == "failed":
+                    print('Close the client socket')
+                    self.transport.close()
                 return
+
+            #Command
             if typ == 'commandReq':
                 reply = self.handle_command(message) #...
                 self.transport.write(reply)
                 return
+            
+            #Upload
             if 'uploadReq' in typ:
                 self.handle_upl(message)
                 return
+
+            #Download
             if 'dnloadReq' in typ:
                 self.handle_dnl()
                 return
-            else:
-                reply = "Je ne sais pas"
-                print('Send: {!r}'.format(reply))
-                self.transport.write(reply.encode("utf_8"))
 
-                host,port = self.transport.get_extra_info('peername')
-                #self.transport.write(host.encode("utf_8"))
-                #self.transport.write(str(port).encode("utf_8"))
-
-                #print('Close the client socket')
-                #self.transport.close()
+            
         else:
             print("Message dropped")
             print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", message, "\n---------------------\n")
