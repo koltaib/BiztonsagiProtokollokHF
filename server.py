@@ -26,6 +26,8 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     rsakey = 0
     key = 0
 
+    client_logged_in = False
+
     upload_cache = {}
 
     #Connections is a dictionary, storing every userdata, like that:
@@ -294,30 +296,47 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
             #Check message type, and handle message accordingly
             typ = message[0]
 
-            #Login
-            if typ == 'loginReq':
-                handle_result = self.handle_login(message)
-                #If login failed, close connection
-                if handle_result == "failed":
+            #If client is not already logged in, we expects a login request message first
+            if not self.client_logged_in:
+
+                #Login
+                if typ == 'loginReq':
+                    
+                    #Handle log in, if password or timestamp failed, it returns "failed"
+                    handle_result = self.handle_login(message)
+
+                    #If login failed, close connection
+                    if handle_result == "failed":
+                        print('Close the client socket')
+                        self.transport.close()
+                        return
+
+                    #Server stores that client is logged in
+                    self.client_logged_in = True
+                    return
+
+                #If first message is not a login request, Server closes the connection
+                else:
                     print('Close the client socket')
                     self.transport.close()
-                return
+                    return
+            else:
 
-            #Command
-            if typ == 'commandReq':
-                reply = self.handle_command(message) #...
-                self.transport.write(reply)
-                return
-            
-            #Upload
-            if 'uploadReq' in typ:
-                self.handle_upl(message)
-                return
+                #Command
+                if typ == 'commandReq':
+                    reply = self.handle_command(message) #...
+                    self.transport.write(reply)
+                    return
+                
+                #Upload
+                if 'uploadReq' in typ:
+                    self.handle_upl(message)
+                    return
 
-            #Download
-            if 'dnloadReq' in typ:
-                self.handle_dnl()
-                return
+                #Download
+                if 'dnloadReq' in typ:
+                    self.handle_dnl()
+                    return
 
             
         else:

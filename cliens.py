@@ -35,7 +35,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
     current_request_hash = ""
     
 
-    login = False
+    logged_in = False
 
     def __init__(self, loop: asyncio.AbstractEventLoop):
         self.rsakey = ServerRSA.load_publickey(pubkey_file_path)
@@ -202,6 +202,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
             print("Message dropped.")
         else:
             print("Login successful")
+            self.logged_in = True
             #setting new key from client random and server random
             self.key = HKDF(bytes.fromhex(hex(int.from_bytes(self.random_number, "big"))[2:] + server_rnd), 32, received_loginReqHash.encode("utf-8"), SHA256, 1) # rquest_hash will be salt
             #print("final key: ", self.key)
@@ -219,26 +220,41 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
             #process message
             info, processed_message = CP.processMessage(message)
             if info != "failed":
-                if processed_message[0] == 'loginRes':
-                    self.handle_login_response(processed_message)
-                elif processed_message[0] == 'commandRes':
-                    payload = self.decode_data(processed_message).decode('utf-8')
-                    if payload.split('\n')[1] != self.current_request_hash:
-                        self.transport.close()
-                    payload = '\n'.join(payload.split('\n')[2:])
-                    print(payload)
-                elif processed_message[0] == 'uploadRes':
-                    payload = self.decode_data(processed_message).decode('utf-8')
-                    if self.current_file_hash != payload.split('\n')[0] or str(self.current_file_size) != payload.split('\n')[1]:
-                        self.transport.close()
+
+                #If Client not logged in, we expect first message to be login response
+                if not self.logged_in:
+
+                    if processed_message[0] == 'loginRes':
+                        self.handle_login_response(processed_message)
+
+                    #If first message is not a login response, Client closes the connection
                     else:
-                        current_file_hash = ''
-                        current_file_size = 0
-                    
+                        self.transport.close()
+                        return
+
+                #If Client is logged in
                 else:
-                    print("Received this reply:")
-                    payload = self.decode_data(processed_message)
-                    print(payload)
+                    if processed_message[0] == 'commandRes':
+                        payload = self.decode_data(processed_message).decode('utf-8')
+                        if payload.split('\n')[1] != self.current_request_hash:
+                            self.transport.close()
+                        payload = '\n'.join(payload.split('\n')[2:])
+                        print(payload)
+                    elif processed_message[0] == 'uploadRes':
+                        payload = self.decode_data(processed_message).decode('utf-8')
+                        if self.current_file_hash != payload.split('\n')[0] or str(self.current_file_size) != payload.split('\n')[1]:
+                            self.transport.close()
+                        else:
+                            current_file_hash = ''
+                            current_file_size = 0
+                    elif 'dnloadRes0' in processed_message[0]:
+                        #TODO
+                        todo = "todo"
+                    else:
+                        print("Received this reply:")
+                        payload = self.decode_data(processed_message)
+                        print(payload)
+
             #if process failed
             else:
                 print("Message dropped")
@@ -256,10 +272,11 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 async def monitor_input(client: EchoClientProtocol):
 
     while True:
-        if client.login:
-
             #wait for user iput
             data = await ainput("> ")
+
+            if data == "close":
+                client.transport.close()
 
             #preprocess user input to see if it is a valid input
             command_type = client.preprocessInput(data)
