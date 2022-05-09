@@ -7,11 +7,9 @@ from Crypto import Random
 from Crypto.Hash import SHA256
 from Crypto.Cipher import AES, PKCS1_OAEP
 from Crypto.Protocol.KDF import HKDF
-import scrypt
-import time
 
 import os
-
+import math
 
 host = '127.0.0.1'
 port = 5150
@@ -22,77 +20,16 @@ SERVER_HOME = os.getcwd()
 pubkey_file_path = "priv_key.txt"
 
 class EchoServerProtocol(asyncio.Protocol, Encrypter):
-    time_window = 2e9 # 2 seconds in nanosecond, used to check timestamps
     rsakey = 0
     key = 0
 
     client_logged_in = False
 
     upload_cache = {}
-
-    #Connections is a dictionary, storing every userdata, like that:
-    #'username' : ("peername", "hashed password", "random salt")
-    #------ username: is the login username, it is the key because it doesn't change
-    #------ peername: host + port of client, it changes by every active connection
-    #------ hashed password: only hashed passwords are stores, and their salt
-    #------ random salt: for every password, a random number is generated as salt, stored for authentication
-
-    connections = { 'alice' : (0, 0, 0), 'bob' : (0,0,0), 'charlie' : (0,0,0)}
+    download_cache = {}
 
     def __init__(self):
-
-        #Load stored RSA PRIVATE (!) key
         self.rsakey = ServerRSA.load_keypair(pubkey_file_path)
-
-        #Sign up default users
-        self.signup("alice", "aaa")
-        self.signup("bob", "bbb")
-        self.signup("charlie", "ccc")
-
-    #Password hash method implemented in Server (and not in Encrypter) because we don't want Client to know which hash method we use
-    def signup(self, username, password):
-        
-        #For every password, a random number is generated for salt, and stored with password hash as well
-        #lenght of random salt is equal to length of password, but minimum 8
-        l = 8 if len(password) < 8 else len(password) 
-        random_salt = Random.get_random_bytes(l)
-
-        #Hash password with random salt
-        hashed_password = scrypt.hash(password, random_salt)
-
-        #Store random salt and hashed password in connections dictionary
-        self.connections[username] = ("", hashed_password, random_salt)
-        return
-    
-    def check_password(self, username, password):
-
-        #Check if user exists
-        if self.connections.get(username, 'Not found') == 'Not found':
-            return False
-        else:
-            #Get stored userdata
-            userdata = self.connections[username]
-
-            #Get stored salt and hash received password with it
-            salt = userdata[2]
-            #Hash password with stored salt
-            hashed_password = scrypt.hash(password, salt)
-
-            #Compare with stored hashed password
-            stored_hashed_password = userdata[1]
-
-            if hashed_password != stored_hashed_password:
-                #Password OK
-                return False
-            else:
-                return True
-
-    def check_timestamp(self, timestamp):
-        server_timestamp = time.time_ns()
-        if server_timestamp - self.time_window/2 < timestamp < server_timestamp + self.time_window/2:
-            return True
-        else:
-            return False
 
 
     def connection_made(self, transport):
@@ -130,7 +67,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                     reply = f'"{args[0]}" directory created'
                 except OSError:
                     reply = "failed"
-            
+    
         elif(cmd == 'del'):
             if len(args) < 1:
                 reply = "failed"
@@ -154,12 +91,14 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                 f = open(args[0], 'rb')
                 content = f.read()
                 f.close()
-        
-                file_size = os.stat(path).st_size
-
+                file_size = os.stat(args[0]).st_size
                 h = SHA256.new()
                 h.update(content)
                 file_hash = h.hexdigest()
+                reply = f'{file_size}\n{file_hash}'
+                port = str(self.transport.get_extra_info('peername')[1])
+                self.download_cache[port] = content
+                
 
 
                 
@@ -170,6 +109,49 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
         return reply
 
+
+    def process_download_input(self, port, message):
+        # upl /home/mark/src/BiztonsagiProtokollokHF/uplfile
+        
+        file_size = len(self.download_cache[port])    
+        n_fragments = math.ceil(file_size/1024)
+
+        for i in range(n_fragments):
+            req_mode = "dnloadRes0"
+            if i+1 == n_fragments:
+                req_mode = "dnloadRes1"
+            
+            rnd = np.random.bytes(6)
+            sequenceNumber = message[1]
+            nonce = sequenceNumber.to_bytes(2,'big') + rnd
+            #Generating payload from input data
+
+            payload = self.download_cache[port][i*1024:(i+1)*1024]
+            
+            #Stores hash for later verification
+
+            #encode payload
+            encr_data, authtag, encr_tk = self.encode_payload(req_mode, payload, nonce)
+
+            info, preparedMessage = CP.prepareMessage((req_mode, sequenceNumber, int.from_bytes(rnd, "big"), encr_data, authtag, encr_tk))
+
+            if info != "failed":
+                self.transport.write(preparedMessage)
+            
+        return
+
+    
+    def handle_dnl(self, message):
+        payload = self.decode_data(message).decode('utf-8')
+        port = str(self.transport.get_extra_info('peername')[1])
+        if payload == 'Cancel':
+            self.download_cache[port] = ''
+            return
+        else:
+            self.process_download_input(port, message)
+        return
+
+        
     def handle_upl(self, message):
         payload = self.decode_data(message)
         file_name = payload.split(b'\n',1)[0].decode('utf-8')
@@ -238,7 +220,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         payload = request_hash + "\n"
         payload += str(rn.hex())
 
-        encPayload, mac, etk = self.encode_payload("", payload, nonce)
+        encPayload, mac, etk = self.encode_payload("", payload, nonce) #TODO: a server amikor elkódol egy payload-ot akkor a saját randomját használja a nonce-ban?
         #setting new key from client random and server random
         self.key = HKDF(bytes.fromhex(client_rnd.to_bytes(6,'big').hex() + rn.hex()), 32, request_hash.encode("utf-8"), SHA256, 1) # rquest_hash will be salt
         #print("DEV _ final key: ", self.key)
@@ -284,7 +266,6 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     #def decode_data(self, message)
 
     def data_received(self, data):
-
         #If first 2 bytes are not the communication protocol version number, we don't process it, but print it for debug
         if data[:2] != CP.versionNumber:
             print("Received not valid message, message dropped:")
@@ -344,14 +325,13 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
                     #Download
                     if 'dnloadReq' in typ:
-                        self.handle_dnl()
+                        self.handle_dnl(message)
                         return
 
                 
             else:
                 print("Message dropped")
                 print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", message, "\n---------------------\n")
-            
         
 
 
