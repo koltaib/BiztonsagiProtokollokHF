@@ -36,8 +36,11 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     #------ peername: host + port of client, it changes by every active connection
     #------ hashed password: only hashed passwords are stores, and their salt
     #------ random salt: for every password, a random number is generated as salt, stored for authentication
-
     connections = { 'alice' : (0, 0, 0), 'bob' : (0,0,0), 'charlie' : (0,0,0)}
+
+    #Cached login requests is a dictionary with usernames, that sent login requests
+    #in every login handle, Server iterates through this dictionary and deletes those that are older than time_window
+    cached_login_reqs = { }
 
     def __init__(self):
 
@@ -292,7 +295,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         
         #processing valid message
         else:
-            
+
             #process data
             info, message = CP.processMessage(data)
             #message is an array, each element is an information of the message
