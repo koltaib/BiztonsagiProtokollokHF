@@ -80,7 +80,6 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
             print("Message dropped")
             print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", preparedMessage, "\n---------------------\n")
 
-        #TODO: next reply should be login response, else connection close
         return
 
 
@@ -212,7 +211,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
         #If first 2 bytes are not the communication protocol version number, we don't process it, but print it for debug
         if message[:2] != CP.versionNumber:
-            print("Received not valid reply:")
+            print("Received not valid message, message dropped:")
             print(message)
 
         #processing valid message
