@@ -10,7 +10,7 @@ class Encrypter:
         AES_key = self.key
         AE = AES.new(AES_key, AES.MODE_GCM, nonce=nonce, mac_len=12)
         encr_data, authtag = b'', b''
-        if "uploadReq" not in typ:
+        if "uploadReq" not in typ and "dnloadRes" not in typ:
             encr_data, authtag = AE.encrypt_and_digest(payload.encode("utf-8"))
         else:
             encr_data, authtag = AE.encrypt_and_digest(payload)
