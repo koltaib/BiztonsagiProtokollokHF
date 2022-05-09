@@ -40,7 +40,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
     download_cache = b''
     
 
-    login = False
+    logged_in = False
 
     def __init__(self, loop: asyncio.AbstractEventLoop):
         self.rsakey = ServerRSA.load_publickey(pubkey_file_path)
@@ -85,7 +85,6 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
             print("Message dropped")
             print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", preparedMessage, "\n---------------------\n")
 
-        #TODO: next reply should be login response, else connection close
         return
 
     def process_download_input(self, msg):
@@ -221,6 +220,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
             print("Message dropped.")
         else:
             print("Login successful")
+            self.logged_in = True
             #setting new key from client random and server random
             self.key = HKDF(bytes.fromhex(hex(int.from_bytes(self.random_number, "big"))[2:] + server_rnd), 32, received_loginReqHash.encode("utf-8"), SHA256, 1) # rquest_hash will be salt
             #print("final key: ", self.key)
@@ -230,7 +230,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
         #If first 2 bytes are not the communication protocol version number, we don't process it, but print it for debug
         if message[:2] != CP.versionNumber:
-            print("Received not valid reply:")
+            print("Received not valid message, message dropped:")
             print(message)
 
         #processing valid message
@@ -238,45 +238,59 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
             #process message
             info, processed_message = CP.processMessage(message)
             if info != "failed":
-                if processed_message[0] == 'loginRes':
-                    self.handle_login_response(processed_message)
-                elif processed_message[0] == 'commandRes':
-                    payload = self.decode_data(processed_message).decode('utf-8')
-                    if payload.split('\n')[1] != self.current_request_hash:
-                        self.transport.close()
 
-                    if payload.split('\n')[0] == 'dnl':
-                        self.dl_requested = True
-                        self.requested_file_size = payload.split('\n')[2]
-                        self.requested_file_hash = payload.split('\n')[3]
-                        
-                    payload = '\n'.join(payload.split('\n')[2:])
-                    print(payload)
-                elif processed_message[0] == 'uploadRes':
-                    payload = self.decode_data(processed_message).decode('utf-8')
-                    if self.current_file_hash != payload.split('\n')[0] or str(self.current_file_size) != payload.split('\n')[1]:
-                        self.transport.close()
+                #If Client not logged in, we expect first message to be login response
+                if not self.logged_in:
+
+                    if processed_message[0] == 'loginRes':
+                        self.handle_login_response(processed_message)
+
+                    #If first message is not a login response, Client closes the connection
                     else:
-                        self.current_file_hash = ''
-                        self.current_file_size = 0
-                elif 'dnloadRes' in processed_message[0]:
-                    payload = self.decode_data(processed_message)
-                    message_type = processed_message[0]
-                    self.download_cache += payload
-                    if message_type == 'dnloadRes1':
-                        h = SHA256.new()
-                        h.update(self.download_cache)
-                        file_hash = h.hexdigest()
-                        file_length = str(len(self.download_cache))
-                        if self.requested_file_hash != file_hash or str(self.requested_file_size) != file_length:
-                            self.transport.close()
-                        f = open(f'{os.getcwd()}/{self.requested_file_name}', "wb")
-                        f.write(self.download_cache)
-                        f.close()
-                        self.download_cache = b''                    
+                        self.transport.close()
+                        return
+
+                #If Client is logged in
                 else:
-                    print("Received this reply:")
-                    payload = self.decode_data(processed_message)
+                    if processed_message[0] == 'commandRes':
+                        payload = self.decode_data(processed_message).decode('utf-8')
+                        if payload.split('\n')[1] != self.current_request_hash:
+                            self.transport.close()
+
+                        if payload.split('\n')[0] == 'dnl':
+                            self.dl_requested = True
+                            self.requested_file_size = payload.split('\n')[2]
+                            self.requested_file_hash = payload.split('\n')[3]                            
+                            
+                        payload = '\n'.join(payload.split('\n')[2:])
+                        print(payload)
+                    elif processed_message[0] == 'uploadRes':
+                        payload = self.decode_data(processed_message).decode('utf-8')
+                        if self.current_file_hash != payload.split('\n')[0] or str(self.current_file_size) != payload.split('\n')[1]:
+                            self.transport.close()
+                        else:
+                            current_file_hash = ''
+                            current_file_size = 0
+                    elif 'dnloadRes' in processed_message[0]:
+                        payload = self.decode_data(processed_message)
+                        message_type = processed_message[0]
+                        self.download_cache += payload
+                        if message_type == 'dnloadRes1':
+                            h = SHA256.new()
+                            h.update(self.download_cache)
+                            file_hash = h.hexdigest()
+                            file_length = str(len(self.download_cache))
+                            if self.requested_file_hash != file_hash or str(self.requested_file_size) != file_length:
+                                self.transport.close()
+                            f = open(f'{os.getcwd()}/{self.requested_file_name}', "wb")
+                            f.write(self.download_cache)
+                            f.close()
+                           self.download_cache = b''  
+                    else:
+                        print("Received this reply:")
+                        payload = self.decode_data(processed_message)
+                        print(payload)
+
             #if process failed
             else:
                 print("Message dropped")
@@ -294,10 +308,11 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 async def monitor_input(client: EchoClientProtocol):
 
     while True:
-        if client.login:
-
             #wait for user iput
             data = await ainput("> ")
+
+            if data == "close":
+                client.transport.close()
 
             #preprocess user input to see if it is a valid input
             command_type = client.preprocessInput(data)

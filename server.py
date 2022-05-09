@@ -22,7 +22,9 @@ pubkey_file_path = "priv_key.txt"
 class EchoServerProtocol(asyncio.Protocol, Encrypter):
     rsakey = 0
     key = 0
-    connections = { 'peername' : "..."}
+
+    client_logged_in = False
+
     upload_cache = {}
     download_cache = {}
 
@@ -198,7 +200,11 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         #client random not retrieved from splits, because it has been processed before and can be found in message[2]
         print("Received this login credentials: ",username, " ", password)
 
-        #TODO: check if timestamp and password are valid
+        #Check if timestamp and password are valid
+        password_success = self.check_password(username, password)
+        timestamp_success = self.check_timestamp(int(timestamp)) #timestamp received as string
+        if not password_success or not timestamp_success:
+            return "failed"
 
         #Login Response
         client_rnd = message[2]
@@ -260,47 +266,72 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     #def decode_data(self, message)
 
     def data_received(self, data):
-
-        info, message = CP.processMessage(data)
-        #message is an array, each element is an information of the message
-        #------ message = (typeString, sequenceNumber, rnd, encPayload, mac, etk)
-        #------ if not login request, etk is just an empty string
-
-        #Check if message could be processed
-        if info != "failed":
-
-            
-
-            #Check message type, and handle message accordingly
-            typ = message[0]
-            if typ == 'loginReq':
-                self.handle_login(message)
-                return
-            if typ == 'commandReq':
-                reply = self.handle_command(message) #...
-                self.transport.write(reply)
-                return
-            if 'uploadReq' in typ:
-                self.handle_upl(message)
-                return
-            if 'dnloadReq' in typ:
-                self.handle_dnl(message)
-                return
-            else:
-                reply = "Je ne sais pas"
-                print('Send: {!r}'.format(reply))
-                self.transport.write(reply.encode("utf_8"))
-
-                host,port = self.transport.get_extra_info('peername')
-                #self.transport.write(host.encode("utf_8"))
-                #self.transport.write(str(port).encode("utf_8"))
-
-                #print('Close the client socket')
-                #self.transport.close()
-        else:
-            print("Message dropped")
-            print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", message, "\n---------------------\n")
+        #If first 2 bytes are not the communication protocol version number, we don't process it, but print it for debug
+        if data[:2] != CP.versionNumber:
+            print("Received not valid message, message dropped:")
+            print(data)
         
+        #processing valid message
+        else:
+            
+            #process data
+            info, message = CP.processMessage(data)
+            #message is an array, each element is an information of the message
+            #------ message = (typeString, sequenceNumber, rnd, encPayload, mac, etk)
+            #------ if not login request, etk is just an empty string
+
+            #Check if message could be processed
+            if info != "failed":
+
+                #Check message type, and handle message accordingly
+                typ = message[0]
+
+                #If client is not already logged in, we expects a login request message first
+                if not self.client_logged_in:
+
+                    #Login
+                    if typ == 'loginReq':
+                        
+                        #Handle log in, if password or timestamp failed, it returns "failed"
+                        handle_result = self.handle_login(message)
+
+                        #If login failed, close connection
+                        if handle_result == "failed":
+                            print('Close the client socket')
+                            self.transport.close()
+                            return
+
+                        #Server stores that client is logged in
+                        self.client_logged_in = True
+                        return
+
+                    #If first message is not a login request, Server closes the connection
+                    else:
+                        print('Close the client socket')
+                        self.transport.close()
+                        return
+                else:
+
+                    #Command
+                    if typ == 'commandReq':
+                        reply = self.handle_command(message) #...
+                        self.transport.write(reply)
+                        return
+                    
+                    #Upload
+                    if 'uploadReq' in typ:
+                        self.handle_upl(message)
+                        return
+
+                    #Download
+                    if 'dnloadReq' in typ:
+                        self.handle_dnl(message)
+                        return
+
+                
+            else:
+                print("Message dropped")
+                print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", message, "\n---------------------\n")
         
 
 
