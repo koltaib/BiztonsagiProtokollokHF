@@ -25,6 +25,9 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     time_window = 2e9 # 2 seconds in nanosecond, used to check timestamps
     rsakey = 0
     key = 0
+
+    upload_cache = {}
+
     #Connections is a dictionary, storing every userdata, like that:
     #'username' : ("peername", "hashed password", "random salt")
     #------ username: is the login username, it is the key because it doesn't change
@@ -142,15 +145,67 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                 except OSError:
                     reply = "failed"
 
+        elif(cmd == 'dnl'):
+            if len(args) < 1 or not os.path.isfile(args[0]):
+                reply = "failed"
+            else:
+                f = open(args[0], 'rb')
+                content = f.read()
+                f.close()
+        
+                file_size = os.stat(path).st_size
+
+                h = SHA256.new()
+                h.update(content)
+                file_hash = h.hexdigest()
+
+
+                
         elif(cmd == 'upl'):
             reply = "Upload file..."
-        elif(cmd == 'dnl'):
-            reply = "Download file..."
         else:
             reply="Ok."
 
         return reply
 
+    def handle_upl(self, message):
+        payload = self.decode_data(message)
+        file_name = payload.split(b'\n',1)[0].decode('utf-8')
+        payload = payload.split(b'\n',1)[1]
+        
+        message_type = message[0]
+        port = str(self.transport.get_extra_info('peername')[1])
+        if port not in self.upload_cache:
+            self.upload_cache[port] = []
+        self.upload_cache[port].append(payload)
+
+        if message_type == 'uploadReq1':
+            content = b''.join(self.upload_cache[port])
+            f = open(f'{os.getcwd()}/{file_name}', "wb")
+            f.write(content)
+            f.close()
+            self.upload_cache[port] = []
+            h = SHA256.new()
+            h.update(content)
+            file_hash = h.hexdigest()
+            file_length = len(content)
+            payload = str(file_hash) + '\n' + str(file_length)
+
+            rnd = np.random.bytes(6)
+            sequenceNumber = message[1]
+            nonce = sequenceNumber.to_bytes(2,'big') + rnd
+
+            encr_data, authtag, encr_tk = self.encode_payload('uploadRes', payload, nonce)
+
+            info, preparedMessage = CP.prepareMessage(('uploadRes', sequenceNumber, int.from_bytes(rnd, "big"), encr_data, authtag, encr_tk))
+
+            if info != "failed":
+                self.transport.write(preparedMessage)
+            
+        
+        return
+
+        
     def handle_login(self, message):
         
         payload = self.decode_data(message)
@@ -256,7 +311,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
             
             #Upload
             if 'uploadReq' in typ:
-                self.handle_upl()
+                self.handle_upl(message)
                 return
 
             #Download

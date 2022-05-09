@@ -119,7 +119,6 @@ class ComProt():
         prepared_message += self.HeaderFields["rsv"]
         prepared_message += enc_payload
         prepared_message += mac
-
         if message[0] == "loginReq":
             prepared_message += etk
 

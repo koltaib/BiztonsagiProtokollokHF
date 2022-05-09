@@ -15,6 +15,9 @@ from Crypto.Hash import SHA256
 from Crypto.Cipher import AES, PKCS1_OAEP
 from Crypto.Protocol.KDF import HKDF
 
+import os
+import math
+
 host = '127.0.0.1'
 port = 5150
 CP = ComProt()
@@ -27,6 +30,10 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
     key = 0
     rsakey = 0
     login_hash = ""
+    current_file_hash = ""
+    current_file_size = 0
+    current_request_hash = ""
+    
 
     login = False
 
@@ -76,6 +83,52 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
         #TODO: next reply should be login response, else connection close
         return
 
+
+    def process_upload_input(self, path):
+        # upl /home/mark/src/BiztonsagiProtokollokHF/uplfile
+        if not os.path.isfile(path):
+            print(f'"{path}" is not a file or does not exists!')
+            return
+
+        f = open(path, 'rb')
+        content = f.read()
+        f.close()
+        
+        file_size = os.stat(path).st_size
+        self.current_file_size = file_size
+
+        h = SHA256.new()
+        h.update(content)
+        self.current_file_hash = h.hexdigest()
+    
+        
+        n_fragments = math.ceil(file_size/1024)
+
+        for i in range(n_fragments):
+            req_mode = "uploadReq0"
+            if i+1 == n_fragments:
+                req_mode = "uploadReq1"
+            
+            rnd = np.random.bytes(6)
+            nonce = self.sequence_number.to_bytes(2, 'big') + rnd
+            
+            #Generating payload from input data
+
+            payload = os.path.basename(path).encode('utf-8') + b'\n' + content[i*1024:(i+1)*1024]
+            
+            #Stores hash for later verification
+
+            #encode payload
+            encr_data, authtag, encr_tk = self.encode_payload(req_mode, payload, nonce)
+
+            info, preparedMessage = CP.prepareMessage((req_mode, self.sequence_number, int.from_bytes(rnd, "big"), encr_data, authtag, encr_tk))
+
+            if info != "failed":
+                self.transport.write(preparedMessage)
+            
+        return
+
+
     def process_command_input(self,typ,command, params):
 
         #random number and sequence number
@@ -84,13 +137,16 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
         #Generating payload from command and params
         payload = command
+
         #if there are params, append to payload
         if len(params) != 0:
             payload += "\n"
             for param in params:
                 payload += param + "\n"
             payload = payload[:-1] #last \n deleted
-
+        h = SHA256.new()
+        h.update(payload.encode('utf-8'))
+        self.current_request_hash = h.hexdigest()
         #encode payload
         encr_data, authtag, encr_tk = self.encode_payload(typ, payload, nonce)
 
@@ -114,6 +170,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
         if(cmd == "upl"):
             return "uploadReq"
         if(cmd == "dnl"):
+            return "commandReq"
             return "dnloadReq"
         else:
             return "Not found"
@@ -164,10 +221,20 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
             if info != "failed":
                 if processed_message[0] == 'loginRes':
                     self.handle_login_response(processed_message)
-                elif processed_message[0] == 'commandRes':  # TODO(mark): validate request_hash
+                elif processed_message[0] == 'commandRes':
                     payload = self.decode_data(processed_message).decode('utf-8')
+                    if payload.split('\n')[1] != self.current_request_hash:
+                        self.transport.close()
                     payload = '\n'.join(payload.split('\n')[2:])
                     print(payload)
+                elif processed_message[0] == 'uploadRes':
+                    payload = self.decode_data(processed_message).decode('utf-8')
+                    if self.current_file_hash != payload.split('\n')[0] or str(self.current_file_size) != payload.split('\n')[1]:
+                        self.transport.close()
+                    else:
+                        current_file_hash = ''
+                        current_file_size = 0
+                    
                 else:
                     print("Received this reply:")
                     payload = self.decode_data(processed_message)
@@ -202,7 +269,7 @@ async def monitor_input(client: EchoClientProtocol):
                 print("Command not valid")
 
             #valid input
-            else:
+            elif command_type == 'commandReq':
 
                 #user will type input command and params separated with a space
                 command_params = data.split(" ")
@@ -216,6 +283,10 @@ async def monitor_input(client: EchoClientProtocol):
                 #print("Prepared Message: ", info)
 
                 await client.send_message(preparedMesage)
+            elif command_type == 'uploadReq':
+                path = data.split(' ')[1]
+                client.process_upload_input(path)
+            
 
 if __name__ == "__main__":
 
