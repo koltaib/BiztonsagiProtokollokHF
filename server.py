@@ -81,10 +81,24 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                 except OSError:
                     reply = "failed"
 
+        elif(cmd == 'dnl'):
+            if len(args) < 1 or not os.path.isfile(args[0]):
+                reply = "failed"
+            else:
+                f = open(args[0], 'rb')
+                content = f.read()
+                f.close()
+        
+                file_size = os.stat(path).st_size
+
+                h = SHA256.new()
+                h.update(content)
+                file_hash = h.hexdigest()
+
+
+                
         elif(cmd == 'upl'):
             reply = "Upload file..."
-        elif(cmd == 'dnl'):
-            reply = "Download file..."
         else:
             reply="Ok."
 

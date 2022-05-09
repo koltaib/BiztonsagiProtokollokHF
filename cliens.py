@@ -170,6 +170,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
         if(cmd == "upl"):
             return "uploadReq"
         if(cmd == "dnl"):
+            return "commandReq"
             return "dnloadReq"
         else:
             return "Not found"
