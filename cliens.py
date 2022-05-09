@@ -32,6 +32,8 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
     login_hash = ""
     current_file_hash = ""
     current_file_size = 0
+    current_request_hash = ""
+    
 
     login = False
 
@@ -135,13 +137,16 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
         #Generating payload from command and params
         payload = command
+
         #if there are params, append to payload
         if len(params) != 0:
             payload += "\n"
             for param in params:
                 payload += param + "\n"
             payload = payload[:-1] #last \n deleted
-
+        h = SHA256.new()
+        h.update(payload.encode('utf-8'))
+        self.current_request_hash = h.hexdigest()
         #encode payload
         encr_data, authtag, encr_tk = self.encode_payload(typ, payload, nonce)
 
@@ -215,8 +220,10 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
             if info != "failed":
                 if processed_message[0] == 'loginRes':
                     self.handle_login_response(processed_message)
-                elif processed_message[0] == 'commandRes':  # TODO(mark): validate request_hash, do this in its own handle_command_response function
+                elif processed_message[0] == 'commandRes':
                     payload = self.decode_data(processed_message).decode('utf-8')
+                    if payload.split('\n')[1] != self.current_request_hash:
+                        self.transport.close()
                     payload = '\n'.join(payload.split('\n')[2:])
                     print(payload)
                 elif processed_message[0] == 'uploadRes':
