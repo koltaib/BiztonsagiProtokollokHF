@@ -15,6 +15,8 @@ host = '127.0.0.1'
 port = 5150
 CP = ComProt()
 
+SERVER_HOME = os.getcwd()
+
 pubkey_file_path = "priv_key.txt"
 
 class EchoServerProtocol(asyncio.Protocol, Encrypter):
@@ -48,7 +50,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                     reply = "failed"                
             else:
                 try:
-                    os.chdir(os.path.expanduser('~'))
+                    os.chdir(SERVER_HOME)
                     reply = f'Directory changed to {os.getcwd()}'
                 except OSError:
                     reply = "failed"
@@ -147,6 +149,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
         payload = payload.decode('utf-8')
         reply = str(self.create_command_reply(payload))
+
 
         payload = payload.split('\n')[0]
         payload += '\n' + str(request_hash) + "\n" + reply
