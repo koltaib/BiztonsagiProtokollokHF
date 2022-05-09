@@ -34,7 +34,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
         self.rsakey = ServerRSA.load_publickey(pubkey_file_path)
 
         self.loop = loop
-    
+
     #----- In Encrypter class
     #def encode_payload(self, typ, payload, nonce, rnd)
 
@@ -45,7 +45,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
         rnd = np.random.bytes(6)
         nonce = self.sequence_number.to_bytes(2, 'big') + rnd
-        
+
         #Generating payload from input data
         timestamp = time.time_ns()
         client_rnd = hex(int.from_bytes(rnd, "big"))
@@ -72,24 +72,24 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
         else:
             print("Message dropped")
             print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", preparedMessage, "\n---------------------\n")
-        
+
         #TODO: next reply should be login response, else connection close
         return
-    
+
     def process_command_input(self,typ,command, params):
 
         #random number and sequence number
         rnd = np.random.bytes(6)
         nonce = self.sequence_number.to_bytes(2, 'big') + rnd
-        
+
         #Generating payload from command and params
-        payload = command 
+        payload = command
         #if there are params, append to payload
         if len(params) != 0:
             payload += "\n"
             for param in params:
                 payload += param + "\n"
-            payload = payload[:-2] #last \n deleted
+            payload = payload[:-1] #last \n deleted
 
         #encode payload
         encr_data, authtag, encr_tk = self.encode_payload(typ, payload, nonce)
@@ -100,6 +100,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
         return (info, preparedMessage)
 
     def preprocessInput(self,cmd):
+        cmd = cmd.split(' ')[0]
         if(cmd == "pwd"):
             return "commandReq"
         if(cmd == "lst"):
@@ -150,12 +151,12 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
 
     def data_received(self, message):
-        
+
         #If first 2 bytes are not the communication protocol version number, we don't process it, but print it for debug
         if message[:2] != CP.versionNumber:
             print("Received not valid reply:")
             print(message)
-        
+
         #processing valid message
         else:
             #process message
@@ -163,6 +164,10 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
             if info != "failed":
                 if processed_message[0] == 'loginRes':
                     self.handle_login_response(processed_message)
+                elif processed_message[0] == 'commandRes':  # TODO(mark): validate request_hash
+                    payload = self.decode_data(processed_message).decode('utf-8')
+                    payload = '\n'.join(payload.split('\n')[2:])
+                    print(payload)
                 else:
                     print("Received this reply:")
                     payload = self.decode_data(processed_message)
@@ -171,9 +176,6 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
             else:
                 print("Message dropped")
                 print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", processed_message, "\n---------------------\n")
-        
-
-
 
     def connection_lost(self, exc):
 
@@ -212,7 +214,7 @@ async def monitor_input(client: EchoClientProtocol):
 
                 info, preparedMesage = client.process_command_input(command_type,command,params)
                 #print("Prepared Message: ", info)
-                
+
                 await client.send_message(preparedMesage)
 
 if __name__ == "__main__":
