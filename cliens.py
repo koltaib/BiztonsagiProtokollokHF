@@ -33,6 +33,11 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
     current_file_hash = ""
     current_file_size = 0
     current_request_hash = ""
+    dl_requested = False
+    requeste_file_name = ""
+    requested_file_size = 0
+    requested_file_hash = ""
+    download_cache = b''
     
 
     logged_in = False
@@ -82,7 +87,17 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
         return
 
+    def process_download_input(self, msg):
+        rnd = np.random.bytes(6)
+        nonce = self.sequence_number.to_bytes(2, 'big') + rnd
+        payload = msg
+        encr_data, authtag, encr_tk = self.encode_payload('dnloadReq', payload, nonce)
+        info, preparedMessage = CP.prepareMessage(('dnloadReq', self.sequence_number, int.from_bytes(rnd, "big"), encr_data, authtag, encr_tk))
 
+        if info != "failed":
+            self.transport.write(preparedMessage)
+            
+        return
     def process_upload_input(self, path):
         # upl /home/mark/src/BiztonsagiProtokollokHF/uplfile
         if not os.path.isfile(path):
@@ -154,8 +169,8 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
         return (info, preparedMessage)
 
-    def preprocessInput(self,cmd):
-        cmd = cmd.split(' ')[0]
+    def preprocessInput(self,_cmd):
+        cmd = _cmd.split(' ')[0]
         if(cmd == "pwd"):
             return "commandReq"
         if(cmd == "lst"):
@@ -169,7 +184,11 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
         if(cmd == "upl"):
             return "uploadReq"
         if(cmd == "dnl"):
+            self.requested_file_name = _cmd.split(' ')[1]
             return "commandReq"
+        if(cmd == "Accept"):
+            return "dnloadReq"
+        if(cmd == "Cancel"):
             return "dnloadReq"
         else:
             return "Not found"
@@ -237,6 +256,12 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
                         payload = self.decode_data(processed_message).decode('utf-8')
                         if payload.split('\n')[1] != self.current_request_hash:
                             self.transport.close()
+
+                        if payload.split('\n')[0] == 'dnl':
+                            self.dl_requested = True
+                            self.requested_file_size = payload.split('\n')[2]
+                            self.requested_file_hash = payload.split('\n')[3]                            
+                            
                         payload = '\n'.join(payload.split('\n')[2:])
                         print(payload)
                     elif processed_message[0] == 'uploadRes':
@@ -246,9 +271,21 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
                         else:
                             current_file_hash = ''
                             current_file_size = 0
-                    elif 'dnloadRes0' in processed_message[0]:
-                        #TODO
-                        todo = "todo"
+                    elif 'dnloadRes' in processed_message[0]:
+                        payload = self.decode_data(processed_message)
+                        message_type = processed_message[0]
+                        self.download_cache += payload
+                        if message_type == 'dnloadRes1':
+                            h = SHA256.new()
+                            h.update(self.download_cache)
+                            file_hash = h.hexdigest()
+                            file_length = str(len(self.download_cache))
+                            if self.requested_file_hash != file_hash or str(self.requested_file_size) != file_length:
+                                self.transport.close()
+                            f = open(f'{os.getcwd()}/{self.requested_file_name}', "wb")
+                            f.write(self.download_cache)
+                            f.close()
+                            self.download_cache = b''  
                     else:
                         print("Received this reply:")
                         payload = self.decode_data(processed_message)
@@ -302,6 +339,8 @@ async def monitor_input(client: EchoClientProtocol):
             elif command_type == 'uploadReq':
                 path = data.split(' ')[1]
                 client.process_upload_input(path)
+            elif command_type == 'dnloadReq':
+                client.process_download_input(data)
             
 
 if __name__ == "__main__":
