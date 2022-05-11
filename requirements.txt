@@ -2,3 +2,4 @@ numpy
 asyncio
 aioconsole
 pycryptodome
+scrypt
