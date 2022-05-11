@@ -112,31 +112,31 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
         if info != "failed":
             self.transport.write(preparedMessage)
             self.sequence_number += 1
-            
+
         return
 
-        
+
     def process_upload_input(self, path): # TODO(mark): empty cache stuff
         # upl /home/mark/src/BiztonsagiProtokollokHF/uplfile
 
         content = self.upload_file_content_cache
-        
+
         file_size = self.current_file_size
-        
+
         n_fragments = math.ceil(file_size/1024)
 
         for i in range(n_fragments):
             req_mode = "uploadReq0"
             if i+1 == n_fragments:
                 req_mode = "uploadReq1"
-            
+
             rnd = np.random.bytes(6)
             nonce = self.sequence_number.to_bytes(2, 'big') + rnd
-            
+
             #Generating payload from input data
 
             payload = content[i*1024:(i+1)*1024]
-            
+
             #Stores hash for later verification
 
             #encode payload
@@ -150,7 +150,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
             if info != "failed":
                 self.transport.write(preparedMessage)
                 self.sequence_number += 1
-            
+
         return
 
 
@@ -180,7 +180,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
         encr_data, authtag, encr_tk = self.encode_payload(typ, header, payload, nonce)
 
-        
+
         #Prepare message to send in the used protocol
         info, preparedMessage = CP.prepareMessage((typ, self.sequence_number, int.from_bytes(rnd, "big"), encr_data, authtag, encr_tk))
 
@@ -215,7 +215,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
             f = open(self.requested_upload_file, 'rb')
             self.upload_file_content_cache = f.read()
             f.close()
-        
+
             file_size = os.stat(self.requested_upload_file).st_size
             self.current_file_size = file_size
 
@@ -268,12 +268,12 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
             #setting new key from client random and server random
             #print("Client random: ", self.client_random)
             #print("Server random: ", server_rnd)
-            
+
             #print("Received loginreq: ", received_loginReqHash)
             #print("Stored login req: ", self.login_hash)
             self.key = HKDF(bytes.fromhex(self.client_random) + bytes.fromhex(server_rnd), 32, bytes.fromhex(received_loginReqHash), SHA256, 1) # rquest_hash will be salt
             #print("Key: ", self.key.hex())
-            
+
             #print("final key: ", self.key)
 
 
@@ -281,12 +281,12 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
         #If first 2 bytes are not the communication protocol version number, we don't process it, but print it for debug
         if message[:2] != CP.versionNumber:
             print("Received not valid message, message dropped:")
-            
+
 
         typ_bytes = message[2:4]
         typ = CP.getfield(typ_bytes)
         if typ == "":
-            print("Ded")
+            print("Error: Type field is empty")
         if "dnloadRes" in typ:
             messages = []
             ln = int.from_bytes(message[4:6], 'big')
@@ -295,11 +295,11 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
                 return
             messages.append(first_message)
             more_messages = True
-            
+
             ln_prev_messages = ln
             while more_messages:
                 #If there are more messages
-                
+
                 if len(message[ln_prev_messages:]) != 0:
                     #Getting length of message i
                     ln_i = int.from_bytes(message[ln_prev_messages:][4:6], "big")
@@ -307,7 +307,6 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
                     #Appending next message to messages
                     current_message = message[ln_prev_messages:ln_prev_messages+ln_i]
-                    print(current_message[:16].hex())
 
                     if len(current_message) == ln_i:
                         messages.append(current_message)
@@ -324,26 +323,26 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
                 _, processed_msg = CP.processMessage(m)
  #               print(f'{len(processed_msg)}\n{processed_msg}')
                 payload = self.decode_data(processed_msg)
-                    
+
                 message_type = processed_msg[0]
                 self.download_cache += payload
                 if message_type == 'dnloadRes1':
-                        
+
                     h = SHA256.new()
                     h.update(self.download_cache)
                     file_hash = h.hexdigest()
                     file_length = str(len(self.download_cache))
-                        
+
                     if self.requested_file_hash != file_hash or str(self.requested_file_size) != file_length:
-                        print("1")
+                        #print("1")
                         self.transport.close()
                     f = open(f'{os.getcwd()}/{self.requested_file_name}', "wb")
                     f.write(self.download_cache)
                     f.close()
-                    self.download_cache = b''  
+                    self.download_cache = b''
             return
 
-        
+
         #Check sequence number
         elif not int.from_bytes(message[6:8], "big") > self.last_received_sequence_number:
             print("Received wrong sequence number, message dropped:")
@@ -365,7 +364,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
                     #If first message is not a login response, Client closes the connection
                     else:
-                        print("2")
+                        #print("2")
                         self.transport.close()
                         return
 
@@ -374,7 +373,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
                     if processed_message[0] == 'commandRes':
                         payload = self.decode_data(processed_message).decode('utf-8')
                         if payload.split('\n')[1] != self.current_request_hash:
-                            print("3")
+                            #print("3")
                             self.transport.close()
 
                         if payload.split('\n')[0] == 'upl':
@@ -385,7 +384,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
                             self.dl_requested = True
                             self.requested_file_size = payload.split('\n')[3]
                             self.requested_file_hash = payload.split('\n')[4]
-        
+
                         #payload = '\n'.join(payload.split('\n')[2:])
                         try:
                             print(b64decode(payload.split('\n')[-1]).decode("utf-8"))
@@ -399,7 +398,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
                         if self.current_file_hash != payload.split('\n')[0] or str(self.current_file_size) != payload.split('\n')[1]:
                             #print("stored hash: ", self.current_file_hash)
                             #print("got: ", payload.split('\n')[0])
-                            print("3")
+                            #print("3")
                             self.transport.close()
                         else:
                             self.current_file_hash = ''
@@ -432,7 +431,7 @@ async def monitor_input(client: EchoClientProtocol):
             data = await ainput("> ")
 
             if data == "close":
-                print("0")
+                #print("0")
                 client.transport.close()
 
             #preprocess user input to see if it is a valid input
@@ -463,7 +462,7 @@ async def monitor_input(client: EchoClientProtocol):
                 continue
             elif command_type == 'dnloadReq':
                 client.process_download_input(data)
-            
+
 
 if __name__ == "__main__":
 

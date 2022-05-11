@@ -41,9 +41,9 @@ class Encrypter:
         if typ == "loginReq":
             RSAcipher = PKCS1_OAEP.new(self.rsakey)
             encr_tk = RSAcipher.encrypt(self.key)
-        
+
         return encr_data, authtag, encr_tk
-    
+
     def decode_data(self, message):
         #print("Trying to decode: ", message)
         #message is an array, each element is an information of the message
@@ -55,7 +55,7 @@ class Encrypter:
         enc_payload = message[3]
         mac = message[4]
         etk = message[5]
-        
+
         #In case of login, we do not have a key yet, data is encrypted with rsa
         if typ == "loginReq":
             RSA_cipher = PKCS1_OAEP.new(self.rsakey)
@@ -68,14 +68,14 @@ class Encrypter:
         #Otherwise we use stored key
         else:
             aes_key = self.key
-    	
+
         #Decrypt payload
         nonce = sqn.to_bytes(2,'big') + rnd.to_bytes(6,'big')
         AE = AES.new(aes_key, AES.MODE_GCM, nonce=nonce, mac_len=12)
 
         header = b'\x01\x00' + HeaderFields[typ] + message[6] + sqn.to_bytes(2,'big') + rnd.to_bytes(6,'big') + b'\x00\x00'
         AE.update(header)
-        
+
         try:
             payload = AE.decrypt_and_verify(enc_payload, mac)
         except Exception as e:

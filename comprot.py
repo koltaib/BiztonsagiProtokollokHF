@@ -25,7 +25,7 @@ class ComProt():
         for key, value in self.HeaderFields.items():
          if val == value:
              return key
-        
+
         print("WARNING: {} value not found in HeaderFields".format(val))
         return ""
 
@@ -48,7 +48,7 @@ class ComProt():
             print("\n FAILED MESSAGE PROCESS")
             print("----- Message not processed")
             return("failed", "")
-        
+
         #Getting sequence number, random number and reserved
         sqn = int.from_bytes(message[6:8], "big")
         rnd = int.from_bytes(message[8:14], "big")
@@ -62,9 +62,7 @@ class ComProt():
         mac=b''
         enc_payload =b''
         if typ == "loginReq" and len(rest) < 268:
-            print()
             print("NOT GOOD NOT OKE SOMETHING IS OFF", rest)
-            print()
 
         if typ == "loginReq":
             etk = rest[-256:]
@@ -89,9 +87,9 @@ class ComProt():
         processedMessage.append(ln)
 
         return ("success", processedMessage)
-    
+
     def prepareMessage(self, message): #prepare outgoing message
-        
+
         #message is an array, each element is an information of the message
         #------ message = (typeString, sequenceNumber, rnd, encPayload, mac, etk)
         #------ if not login request, etk is just an empty string
@@ -103,8 +101,6 @@ class ComProt():
             print("----- Message not processed")
             return("failed", "")
 
-        
-        print(message)
         sqn = message[1]
         rnd = message[2]
         enc_payload = message[3]
@@ -114,8 +110,8 @@ class ComProt():
         if message[0] == "loginReq":
             etk = message[5]
             l += 256
-        
-        
+
+
         prepared_message = self.versionNumber
         prepared_message += typ
         prepared_message += l.to_bytes(2, 'big')
