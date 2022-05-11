@@ -17,11 +17,14 @@ host = '127.0.0.1'
 port = 5150
 CP = ComProt()
 
-SERVER_HOME = os.getcwd()
+SERVER_HOME = os.getcwd() + "/server"
 
 pubkey_file_path = "priv_key.txt"
 
 class EchoServerProtocol(asyncio.Protocol, Encrypter):
+    sequence_number = 1
+    last_received_sequence_number = 0
+
     time_window = 2e9
     rsakey = 0
     key = 0
@@ -113,8 +116,17 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         elif(cmd == 'chd'):
             if len(args) > 0:
                 try:
+                    #NOTE(Bea): cd .. only allowed to root
+                    current_dir = os.getcwd()
+                    
                     os.chdir(args[0])
                     reply = f'Directory changed to {os.getcwd()}'
+                    
+                    #NOTE(Bea): if kliens changed dir outside server folder, change it back
+                    if len(os.getcwd) < SERVER_HOME:
+                        os.chdir(current_dir)
+                        reply = 'Not allowed.'
+
                 except OSError:
                     reply = "failed"                
             else:
@@ -187,7 +199,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                 req_mode = "dnloadRes1"
             
             rnd = np.random.bytes(6)
-            sequenceNumber = message[1]
+            sequenceNumber = self.sequence_number
             nonce = sequenceNumber.to_bytes(2,'big') + rnd
             #Generating payload from input data
 
@@ -202,6 +214,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
             if info != "failed":
                 self.transport.write(preparedMessage)
+                self.sequence_number += 1
             
         return
 
@@ -241,7 +254,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
             payload = str(file_hash) + '\n' + str(file_length)
 
             rnd = np.random.bytes(6)
-            sequenceNumber = message[1]
+            sequenceNumber = self.sequence_number
             nonce = sequenceNumber.to_bytes(2,'big') + rnd
 
             encr_data, authtag, encr_tk = self.encode_payload('uploadRes', payload, nonce)
@@ -250,6 +263,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
             if info != "failed":
                 self.transport.write(preparedMessage)
+                self.sequence_number += 1
             
         
         return
@@ -271,11 +285,12 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         if not password_success or not timestamp_success:
             print("asdf")
             return "failed"
-
+        print(message)
         #Login Response
         client_rnd = message[2]
         rn = np.random.bytes(6)
-        server_rnd = int.from_bytes(rn, "big")
+        server_rnd = Random.get_random_bytes(16).hex()#int.from_bytes(rn, "big")
+        
         sequenceNumber = message[1]
         nonce = sequenceNumber.to_bytes(2,'big') + rn
         #Generating hashed login request with rnd we got from client
@@ -284,17 +299,24 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         request_hash = hash.hexdigest()
         
         payload = request_hash + "\n"
-        payload += str(rn.hex())
-
-        encPayload, mac, etk = self.encode_payload("", payload, nonce) #TODO: a server amikor elkódol egy payload-ot akkor a saját randomját használja a nonce-ban?
+        payload += server_rnd
+        l = 16 + len(payload) + 12 + 256
+        header = CP.versionNumber + CP.HeaderFields["loginRes"] + l.to_bytes(2, 'big') + sequenceNumber.to_bytes(2, 'big') + rn + CP.HeaderFields["rsv"]
+    
         #setting new key from client random and server random
         self.key = HKDF(bytes.fromhex(client_rnd.to_bytes(6,'big').hex() + rn.hex()), 32, request_hash.encode("utf-8"), SHA256, 1) # rquest_hash will be salt
+        encPayload, mac, etk = self.encode_payload("loginRes", header, payload, nonce) #TODO: a server amikor elkódol egy payload-ot akkor a saját randomját használja a nonce-ban?
         #print("DEV _ final key: ", self.key)
-        info, prepared_message = CP.prepareMessage(("loginRes", sequenceNumber, server_rnd, encPayload, mac, etk))
+        info, prepared_message = CP.prepareMessage(("loginRes", sequenceNumber, int.from_bytes(rn, "big"), encPayload, mac, etk))
 
         if info != "failed":
             #print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", preparedMessage, "\n---------------------\n")
             self.transport.write(prepared_message)
+            self.sequence_number += 1
+
+            #NOTE(Bea): default folder for clients is /server folder, not allowed to go outside
+            os.chdir(SERVER_HOME)
+
         else:
             print("Message dropped")
             print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", prepared_message, "\n---------------------\n")
@@ -304,6 +326,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     async def send_message(self, data):
 
         self.transport.write(data)
+        self.sequence_number += 1
 
         await asyncio.sleep(0.1)
     
@@ -336,6 +359,11 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         if data[:2] != CP.versionNumber:
             print("Received not valid message, message dropped:")
             print(data)
+
+        #Check sequence number
+        elif not int.from_bytes(data[6:8], "big") > self.last_received_sequence_number:
+            print("Received wrong sequence number, message dropped:")
+        
         
         #processing valid message
         else:
@@ -348,6 +376,9 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
             #Check if message could be processed
             if info != "failed":
+
+                #Store last received sequence number
+                self.last_received_sequence_number = message[1]
 
                 #Check message type, and handle message accordingly
                 typ = message[0]
@@ -382,6 +413,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                     if typ == 'commandReq':
                         reply = self.handle_command(message) #...
                         self.transport.write(reply)
+                        self.sequence_number += 1
                         return
                     
                     #Upload

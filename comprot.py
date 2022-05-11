@@ -78,6 +78,7 @@ class ComProt():
         #message is an array, each element is an information of the message
         #------ message = (typeString, sequenceNumber, rnd, encPayload, mac, etk)
         #------ if not login request, etk is just an empty string
+
         processedMessage = []
         processedMessage.append(typ)
         processedMessage.append(sqn)
@@ -85,6 +86,7 @@ class ComProt():
         processedMessage.append(enc_payload)
         processedMessage.append(mac)
         processedMessage.append(etk)
+        processedMessage.append(ln)
 
         return ("success", processedMessage)
     
@@ -101,6 +103,8 @@ class ComProt():
             print("----- Message not processed")
             return("failed", "")
 
+        
+        print(message)
         sqn = message[1]
         rnd = message[2]
         enc_payload = message[3]
@@ -110,6 +114,7 @@ class ComProt():
         if message[0] == "loginReq":
             etk = message[5]
             l += 256
+        
         
         prepared_message = self.versionNumber
         prepared_message += typ
