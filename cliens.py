@@ -116,8 +116,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
         return
 
 
-    def process_upload_input(self, path): # TODO(mark): empty cache stuff
-        # upl /home/mark/src/BiztonsagiProtokollokHF/uplfile
+    def process_upload_input(self, path):
 
         content = self.upload_file_content_cache
 
@@ -211,7 +210,6 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
                 print(f'"{self.requested_upload_file}" is not a file or does not exists!')
                 return
 
-            # TODO(mark): don't do this, this is ugly
             f = open(self.requested_upload_file, 'rb')
             self.upload_file_content_cache = f.read()
             f.close()
