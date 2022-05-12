@@ -52,14 +52,14 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         #Sign up default users
         self.signup("alice", "aaa")
         self.signup("bob", "bbb")
-        self.signup("charlie", "ccc")        
+        self.signup("charlie", "ccc")
 
     #Password hash method implemented in Server (and not in Encrypter) because we don't want Client to know which hash method we use
     def signup(self, username, password):
 
         #For every password, a random number is generated for salt, and stored with password hash as well
         #lenght of random salt is equal to length of password, but minimum 8
-        l = 8 if len(password) < 8 else len(password) 
+        l = 8 if len(password) < 8 else len(password)
         random_salt = Random.get_random_bytes(l)
 
         #Hash password with random salt
@@ -126,7 +126,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                         os.chdir(args[0])
                         reply = f'Directory changed to {os.getcwd()}'
                 except OSError:
-                    reply = "failed"                
+                    reply = "failed"
             else:
                 try:
                     os.chdir(SERVER_HOME)
@@ -142,7 +142,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                     reply = f'"{args[0]}" directory created'
                 except OSError:
                     reply = "failed"
-    
+
         elif(cmd == 'del'):
             if len(args) < 1:
                 reply = "failed"
@@ -173,10 +173,10 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                 reply = f'{file_size}\n{file_hash}'
                 port = str(self.transport.get_extra_info('peername')[1])
                 self.download_cache[port] = content
-                
 
 
-                
+
+
         elif(cmd == 'upl'):
             reply = "Upload file..."
         else:
@@ -187,22 +187,22 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
     def process_download_input(self, port, message):
         # upl /home/mark/src/BiztonsagiProtokollokHF/uplfile
-        
-        file_size = len(self.download_cache[port])    
+
+        file_size = len(self.download_cache[port])
         n_fragments = math.ceil(file_size/1024)
 
         for i in range(n_fragments):
             req_mode = "dnloadRes0"
             if i+1 == n_fragments:
                 req_mode = "dnloadRes1"
-            
+
             rnd = np.random.bytes(6)
             sequenceNumber = self.sequence_number
             nonce = sequenceNumber.to_bytes(2,'big') + rnd
             #Generating payload from input data
 
             payload = self.download_cache[port][i*1024:(i+1)*1024]
-            
+
             #Stores hash for later verification
 
             #encode payload
@@ -213,10 +213,10 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
             if info != "failed":
                 self.transport.write(preparedMessage)
                 self.sequence_number += 1
-            
+
         return
 
-    
+
     def handle_dnl(self, message):
         payload = self.decode_data(message).decode('utf-8')
         port = str(self.transport.get_extra_info('peername')[1])
@@ -227,12 +227,12 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
             self.process_download_input(port, message)
         return
 
-        
+
     def handle_upl(self, message):
         payload = self.decode_data(message)
         file_name = payload.split(b'\n',1)[0].decode('utf-8')
         payload = payload.split(b'\n',1)[1]
-        
+
         message_type = message[0]
         port = str(self.transport.get_extra_info('peername')[1])
         if port not in self.upload_cache:
@@ -262,13 +262,13 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
             if info != "failed":
                 self.transport.write(preparedMessage)
                 self.sequence_number += 1
-            
-        
+
+
         return
 
-        
+    # FIXME(mark): If a user is logged in and closes the connection the user can't log in anymore
     def handle_login(self, message):
-        
+
         payload = self.decode_data(message)
         splits = payload.decode("utf-8").split("\n")
         timestamp = splits[0]
@@ -287,14 +287,14 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         client_rnd = splits[3]
         rn = np.random.bytes(6)
         server_rnd = Random.get_random_bytes(16).hex()#int.from_bytes(rn, "big")
-        
+
         sequenceNumber = message[1]
         nonce = sequenceNumber.to_bytes(2,'big') + rn
         #Generating hashed login request with rnd we got from client
         hash = SHA256.new()
         hash.update(payload)
         request_hash = hash.hexdigest()
-        
+
         payload = request_hash + "\n"
         payload += server_rnd
         l = 16 + len(payload) + 12
@@ -313,11 +313,11 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
             self.sequence_number += 1
             #NOTE(Bea): default folder for clients is /server folder, not allowed to go outside
             os.chdir(SERVER_HOME)
-            
+
         else:
             print("Message dropped")
             print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", prepared_message, "\n---------------------\n")
-        
+
         return
 
     async def send_message(self, data):
@@ -326,14 +326,14 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         self.sequence_number += 1
 
         await asyncio.sleep(0.1)
-    
+
     def handle_command(self,message):
         rn = np.random.bytes(6)
         sequenceNumber = self.sequence_number
         nonce = sequenceNumber.to_bytes(2,'big') + rn
         server_rnd = int.from_bytes(rn, "big")
         payload = self.decode_data(message)
-        
+
         hash = SHA256.new()
         hash.update(payload)
         request_hash = hash.hexdigest()
@@ -366,8 +366,8 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         #Check sequence number
         elif not int.from_bytes(data[6:8], "big") > self.last_received_sequence_number:
             print("Received wrong sequence number, message dropped:")
-        
-        
+
+
         #processing valid message
         else:
 
@@ -391,7 +391,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
                     #Login
                     if typ == 'loginReq':
-                        
+
                         #Handle log in, if password or timestamp failed, it returns "failed"
                         handle_result = self.handle_login(message)
 
@@ -418,7 +418,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                         self.transport.write(reply)
                         self.sequence_number += 1
                         return
-                    
+
                     #Upload
                     if 'uploadReq' in typ:
                         self.handle_upl(message)
@@ -429,11 +429,11 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                         self.handle_dnl(message)
                         return
 
-                
+
             else:
                 print("Message dropped")
                 print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", message, "\n---------------------\n")
-        
+
 
 
 async def main():
