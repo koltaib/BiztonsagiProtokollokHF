@@ -17,7 +17,7 @@ host = '127.0.0.1'
 port = 5150
 CP = ComProt()
 
-SERVER_HOME = os.getcwd() + "/server" # TODO(mark): This needs some fixing
+SERVER_HOME = os.getcwd() + "/server"
 
 pubkey_file_path = "priv_key.txt"
 
@@ -118,15 +118,13 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                 try:
                     #NOTE(Bea): cd .. only allowed to root
                     current_dir = os.getcwd()
-                    
-                    os.chdir(args[0])
-                    reply = f'Directory changed to {os.getcwd()}'
-                    
-                    #NOTE(Bea): if kliens changed dir outside server folder, change it back
-                    if len(os.getcwd) < SERVER_HOME:
-                        os.chdir(current_dir)
-                        reply = 'Not allowed.'
 
+                    new_path = os.path.join(current_dir, os.path.realpath(args[0]))
+                    if not new_path.startswith(SERVER_HOME):
+                        reply = 'failed'
+                    else:
+                        os.chdir(args[0])
+                        reply = f'Directory changed to {os.getcwd()}'
                 except OSError:
                     reply = "failed"                
             else:
@@ -314,7 +312,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
             self.transport.write(prepared_message)
             self.sequence_number += 1
             #NOTE(Bea): default folder for clients is /server folder, not allowed to go outside
-            #os.chdir(SERVER_HOME)
+            os.chdir(SERVER_HOME)
             
         else:
             print("Message dropped")
@@ -331,7 +329,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     
     def handle_command(self,message):
         rn = np.random.bytes(6)
-        sequenceNumber = message[1]
+        sequenceNumber = self.sequence_number
         nonce = sequenceNumber.to_bytes(2,'big') + rn
         server_rnd = int.from_bytes(rn, "big")
         payload = self.decode_data(message)
@@ -342,7 +340,10 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
         payload = payload.decode('utf-8')
         reply = str(self.create_command_reply(payload))
-
+        if reply != 'failed':
+            reply = 'success\n' + reply
+        else:
+            reply = 'rejected'
 
         payload = payload.split('\n')[0]
         payload += '\n' + str(request_hash) + "\n" + reply
@@ -350,6 +351,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         header = CP.versionNumber + CP.HeaderFields["commandRes"] + l.to_bytes(2, 'big') + self.sequence_number.to_bytes(2, 'big') + rn + CP.HeaderFields["rsv"]
         encPayload, mac, etk = self.encode_payload("commandRes", header, payload, nonce)
         info, prepared_message = CP.prepareMessage(("commandRes", sequenceNumber, server_rnd, encPayload, mac, etk))
+        self.sequence_number += 1
         return prepared_message
 
     #----In Encrypter class
@@ -377,7 +379,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
             #Check if message could be processed
             if info != "failed":
-
+                self.sequence_number += 1
                 #Store last received sequence number
                 self.last_received_sequence_number = message[1]
 
