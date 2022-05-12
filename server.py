@@ -17,7 +17,7 @@ host = '127.0.0.1'
 port = 5150
 CP = ComProt()
 
-SERVER_HOME = os.getcwd() + "/server"
+SERVER_HOME = os.getcwd() + "/server" # TODO(mark): This needs some fixing
 
 pubkey_file_path = "priv_key.txt"
 
@@ -285,9 +285,8 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         if not password_success or not timestamp_success:
             print("asdf")
             return "failed"
-        print(message)
         #Login Response
-        client_rnd = message[2]
+        client_rnd = splits[3]
         rn = np.random.bytes(6)
         server_rnd = Random.get_random_bytes(16).hex()#int.from_bytes(rn, "big")
         
@@ -300,23 +299,23 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         
         payload = request_hash + "\n"
         payload += server_rnd
-        l = 16 + len(payload) + 12 + 256
+        l = 16 + len(payload) + 12
         header = CP.versionNumber + CP.HeaderFields["loginRes"] + l.to_bytes(2, 'big') + sequenceNumber.to_bytes(2, 'big') + rn + CP.HeaderFields["rsv"]
-    
         #setting new key from client random and server random
-        self.key = HKDF(bytes.fromhex(client_rnd.to_bytes(6,'big').hex() + rn.hex()), 32, request_hash.encode("utf-8"), SHA256, 1) # rquest_hash will be salt
+        #print("key:", RSAcipher.decrypt(message[5]))
+
         encPayload, mac, etk = self.encode_payload("loginRes", header, payload, nonce) #TODO: a server amikor elkódol egy payload-ot akkor a saját randomját használja a nonce-ban?
         #print("DEV _ final key: ", self.key)
+        self.key = HKDF(bytes.fromhex(client_rnd) + bytes.fromhex(server_rnd), 32, bytes.fromhex(request_hash), SHA256, 1) # rquest_hash will be salt
         info, prepared_message = CP.prepareMessage(("loginRes", sequenceNumber, int.from_bytes(rn, "big"), encPayload, mac, etk))
 
         if info != "failed":
             #print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", preparedMessage, "\n---------------------\n")
             self.transport.write(prepared_message)
             self.sequence_number += 1
-
             #NOTE(Bea): default folder for clients is /server folder, not allowed to go outside
-            os.chdir(SERVER_HOME)
-
+            #os.chdir(SERVER_HOME)
+            
         else:
             print("Message dropped")
             print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", prepared_message, "\n---------------------\n")
@@ -347,7 +346,9 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
         payload = payload.split('\n')[0]
         payload += '\n' + str(request_hash) + "\n" + reply
-        encPayload, mac, etk = self.encode_payload("commandRes", payload, nonce)
+        l = 16 + len(payload) + 12
+        header = CP.versionNumber + CP.HeaderFields["commandRes"] + l.to_bytes(2, 'big') + self.sequence_number.to_bytes(2, 'big') + rn + CP.HeaderFields["rsv"]
+        encPayload, mac, etk = self.encode_payload("commandRes", header, payload, nonce)
         info, prepared_message = CP.prepareMessage(("commandRes", sequenceNumber, server_rnd, encPayload, mac, etk))
         return prepared_message
 
