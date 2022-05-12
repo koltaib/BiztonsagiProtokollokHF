@@ -40,6 +40,8 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     #------ peername: host + port of client, it changes by every active connection
     #------ hashed password: only hashed passwords are stores, and their salt
     #------ random salt: for every password, a random number is generated as salt, stored for authentication
+
+    # TODO(mark): create a user dict, where we store their caches and sqn to defend against replay attacks. This could also solve the problem with repeated logins
     connections = { 'alice' : (0, 0, 0), 'bob' : (0,0,0), 'charlie' : (0,0,0)}
 
     #Cached login requests is a dictionary with usernames, that sent login requests
