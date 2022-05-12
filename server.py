@@ -173,10 +173,6 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                 reply = f'{file_size}\n{file_hash}'
                 port = str(self.transport.get_extra_info('peername')[1])
                 self.download_cache[port] = content
-
-
-
-
         elif(cmd == 'upl'):
             reply = "Upload file..."
         else:
@@ -206,8 +202,9 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
             #Stores hash for later verification
 
             #encode payload
-            encr_data, authtag, encr_tk = self.encode_payload(req_mode, payload, nonce)
-
+            l = 16 + len(payload) + 12
+            header = CP.versionNumber + CP.HeaderFields[req_mode] + l.to_bytes(2, 'big') + sequenceNumber.to_bytes(2, 'big') + rnd + CP.HeaderFields["rsv"]
+            encr_data, authtag, encr_tk = self.encode_payload(req_mode, header, payload, nonce)
             info, preparedMessage = CP.prepareMessage((req_mode, sequenceNumber, int.from_bytes(rnd, "big"), encr_data, authtag, encr_tk))
 
             if info != "failed":
@@ -216,7 +213,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
         return
 
-
+    # FIXME(mark): handle these stuff: the case when user types Ready multiple times in a row, the user types Ready before the dnl commandreq
     def handle_dnl(self, message):
         payload = self.decode_data(message).decode('utf-8')
         port = str(self.transport.get_extra_info('peername')[1])
