@@ -20,10 +20,10 @@ import math
 
 from base64 import b64decode
 
-host =  '10.71.0.43' #'127.0.0.1'
+host =  '127.0.0.1' #'10.71.0.43' #'127.0.0.1'
 port = 5150
 CP = ComProt()
-pubkey_file_path = "pubkey.pem"
+pubkey_file_path = "server_pub_key.txt"
 
 class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
@@ -332,7 +332,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
                     file_length = str(len(self.download_cache))
 
                     if self.requested_file_hash != file_hash or str(self.requested_file_size) != file_length:
-                        #print("1")
+                        print("1")
                         self.transport.close()
                     f = open(f'{os.getcwd()}/{self.requested_file_name}', "wb")
                     f.write(self.download_cache)
@@ -362,7 +362,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
 
                     #If first message is not a login response, Client closes the connection
                     else:
-                        #print("2")
+                        print("2")
                         self.transport.close()
                         return
 
@@ -371,7 +371,7 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
                     if processed_message[0] == 'commandRes':
                         payload = self.decode_data(processed_message).decode('utf-8')
                         if payload.split('\n')[1] != self.current_request_hash:
-                            #print("3")
+                            print("3")
                             self.transport.close()
 
                         if payload.split('\n')[0] == 'upl':
@@ -379,9 +379,10 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
                                 self.process_upload_input(self.requested_upload_file)
 
                         if payload.split('\n')[0] == 'dnl':
-                            self.dl_requested = True
-                            self.requested_file_size = payload.split('\n')[3]
-                            self.requested_file_hash = payload.split('\n')[4]
+                            if payload.split('\n')[2] != 'rejected':
+                                self.dl_requested = True
+                                self.requested_file_size = payload.split('\n')[3]
+                                self.requested_file_hash = payload.split('\n')[4]
 
                         #payload = '\n'.join(payload.split('\n')[2:])
                         try:
@@ -414,7 +415,6 @@ class EchoClientProtocol(asyncio.Protocol, Encrypter):
                 print("\n------- dev info ------\nMessage process: ", info, "\nMessage is: ", processed_message, "\n---------------------\n")
 
     def connection_lost(self, exc):
-
         print('The server closed the connection')
 
         self.loop.stop()
