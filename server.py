@@ -119,8 +119,11 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     
     def connection_lost(self, exc):
         username = self.get_username()
-        self.user_dictionary[username]['logged in'] = False
-        print('The client closed the connection')
+        if username != "Not active":
+            self.user_dictionary[username]['logged in'] = False
+            print('The client closed the connection')
+        else:
+            print("Didn't find peername")
     
     def error_received(self, exception):
         print("Error occurred:", exception)
@@ -430,7 +433,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     def data_received(self, data):
         #Getting last received sequence number
         peername = self.transport.get_extra_info('peername')
-        username = self.get_username(peername)
+        username = self.get_username()
         if username == "Not active":
             l_sqn = 0
         else:
@@ -464,8 +467,13 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
                 #If client is not already logged in, we expects a login request message first
                 username = self.get_username()
+                
+                if username == 'Not active':
+                    logged_in = False
+                else:
+                    logged_in = self.user_dictionary[username]['logged in']
 
-                if not self.user_dictionary[username]['logged in']:
+                if not logged_in:
 
                     #Login
                     if typ == 'loginReq':
