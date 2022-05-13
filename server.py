@@ -118,8 +118,12 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         self.transport = transport
     
     def connection_lost(self, exc):
-        self.client_logged_in = False
+        username = self.get_username()
+        self.user_dictionary[username]['logged in'] = False
         print('The client closed the connection')
+    
+    def error_received(self, exception):
+        print("Error occurred:", exception)
 
     def create_command_reply(self,cmd):  # NOTE(mark): maybe create a utility class for this
         cmd = cmd.split('\n')
@@ -416,7 +420,8 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     #def decode_data(self, message)
 
     #Get user by active peername
-    def get_username(self, peername):
+    def get_username(self):
+        peername = self.transport.get_extra_info('peername')
         for user in self.user_dictionary:
              if self.user_dictionary[user]['peername'] == peername:
                 return user
@@ -458,7 +463,9 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                 typ = message[0]
 
                 #If client is not already logged in, we expects a login request message first
-                if not self.client_logged_in:
+                username = self.get_username()
+
+                if not self.user_dictionary[username]['logged in']:
 
                     #Login
                     if typ == 'loginReq':
@@ -473,7 +480,8 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                             return
 
                         #Server stores that client is logged in
-                        self.client_logged_in = True
+                        username = self.get_username()
+                        self.user_dictionary[username]['logged in'] = True
                         return
 
                     #If first message is not a login request, Server closes the connection
