@@ -501,7 +501,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
                     #Store last received sequence number
                     peername = self.transport.get_extra_info('peername')
-                    username = self.get_username(peername)
+                    username = self.get_username()
                     self.user_dictionary[username]['last_received_sequence_number'] = message[1]
 
                     #Command
