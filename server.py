@@ -219,9 +219,16 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                 self.download_cache[port] = content
 
         elif(cmd == 'upl'):
-            reply = "Upload file..."
+            if int(args[1]) > 10000000:
+                reply = 'failed'
+
+            else:
+                port = str(self.transport.get_extra_info('peername')[1])
+                self.upload_cache[port] = [args[0]]
+
+                reply = "Upload accepted"
         else:
-            reply="Ok."
+            reply="failed"
 
         return reply
 
@@ -272,32 +279,29 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
     def handle_upl(self, message):
         payload = self.decode_data(message)
-        file_name = payload.split(b'\n',1)[0].decode('utf-8')
-        payload = payload.split(b'\n',1)[1]
+        port = str(self.transport.get_extra_info('peername')[1])
+        file_name = self.upload_cache[port][0]
 
         message_type = message[0]
-        port = str(self.transport.get_extra_info('peername')[1])
-        if port not in self.upload_cache:
-            self.upload_cache[port] = []
         self.upload_cache[port].append(payload)
 
         if message_type == 'uploadReq1':
-            content = b''.join(self.upload_cache[port])
+            content = b''.join(self.upload_cache[port][1:])
             f = open(f'{os.getcwd()}/{file_name}', "wb")
             f.write(content)
             f.close()
-            self.upload_cache[port] = []
             h = SHA256.new()
             h.update(content)
             file_hash = h.hexdigest()
             file_length = len(content)
             payload = str(file_hash) + '\n' + str(file_length)
-
+            self.upload_cache[port] = []
             rnd = np.random.bytes(6)
             sequenceNumber = self.sequence_number
             nonce = sequenceNumber.to_bytes(2,'big') + rnd
-
-            encr_data, authtag, encr_tk = self.encode_payload('uploadRes', payload, nonce)
+            l = 16 + len(payload) + 12
+            header = CP.versionNumber + CP.HeaderFields['uploadRes'] + l.to_bytes(2, 'big') + sequenceNumber.to_bytes(2, 'big') + rnd + CP.HeaderFields["rsv"]
+            encr_data, authtag, encr_tk = self.encode_payload('uploadRes', header, payload, nonce)
 
             info, preparedMessage = CP.prepareMessage(('uploadRes', sequenceNumber, int.from_bytes(rnd, "big"), encr_data, authtag, encr_tk))
 
@@ -387,7 +391,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         payload = payload.decode('utf-8')
         reply = str(self.create_command_reply(payload))
         if reply != 'failed':
-            reply = 'success\n' + reply
+            reply = 'accept\n' + reply
         else:
             reply = 'rejected'
 
