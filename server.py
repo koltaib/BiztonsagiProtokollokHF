@@ -75,6 +75,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
 
         #Check if user exists
         if self.connections.get(username, 'Not found') == 'Not found':
+            print("Unsuccessful login, no such user.")
             return False
         else:
             #Get stored userdata
@@ -89,9 +90,12 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
             stored_hashed_password = userdata[1]
 
             if hashed_password != stored_hashed_password:
-                #Password OK
+                #Password Not Ok
+                print("Unsuccessful login, bad password.")
                 return False
             else:
+                #Password OK
+                print("User logged in.")
                 return True
 
     def check_timestamp(self, timestamp):
@@ -99,6 +103,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         if server_timestamp - self.time_window/2 < timestamp < server_timestamp + self.time_window/2:
             return True
         else:
+            print("Unsuccessful login, bad timestamp.")
             return False
 
 
@@ -112,9 +117,13 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         args = cmd[1:]
         cmd = cmd[0]
         if(cmd == 'pwd'):
+            print("Got command: pwd")
             reply = os.getcwd()
+
         elif(cmd == 'lst'):
+            print("Got command: lst")
             reply = '\n'.join(os.listdir())
+
         elif(cmd == 'chd'):
             if len(args) > 0:
                 try:
@@ -124,47 +133,75 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                     new_path = os.path.join(current_dir, os.path.realpath(args[0]))
                     if not new_path.startswith(SERVER_HOME):
                         reply = 'failed'
+                        print("User tried to go outside root directory.")
+
                     else:
                         os.chdir(args[0])
                         reply = f'Directory changed to {os.getcwd()}'
-                except OSError:
+                        print("User changed directory to: ", args[0])
+
+                except OSError as exc:
                     reply = "failed"
+                    print("OSError: ", exc)
+
             else:
                 try:
                     os.chdir(SERVER_HOME)
                     reply = f'Directory changed to {os.getcwd()}'
-                except OSError:
+                    print("User changed directory to home")
+
+                except OSError as exc:
                     reply = "failed"
+                    print("OSError: ", exc)
+
         elif(cmd == 'mkd'):
             if len(args) < 1:
                 reply = "failed"
+                print("Got bad command, mkd without params.")
+
             else:
                 try:
                     os.mkdir(args[0])
                     reply = f'"{args[0]}" directory created'
-                except OSError:
+                    print("User created directory: ", args[0])
+
+                except OSError as exc:
                     reply = "failed"
+                    print("OSError: ", exc)
 
         elif(cmd == 'del'):
             if len(args) < 1:
                 reply = "failed"
+                print("Got bad command, del without params.")
+
             else:
                 try:
                     if not os.path.isfile(args[0]) and not os.path.islink(args[0]) and not os.path.isdir(args[0]):
                         reply = "failed"
+                        print("User tried to delete not empty dir.")
+
                     elif os.path.isfile(args[0]) or os.path.islink(args[0]):
                         os.remove(args[0])
                         reply = f'"{args[0]}" file removed'
+                        print("User removed file: ", args[0])
+
                     elif os.path.isdir(args[0]):
                         os.rmdir(args[0])
                         reply = f'"{args[0]}" directory removed'
-                except OSError:
+                        print("User removed dir: ", args[0])
+
+                except OSError as exc:
                     reply = "failed"
+                    print("OSError: ", exc)
 
         elif(cmd == 'dnl'):
             if len(args) < 1 or not os.path.isfile(args[0]):
                 reply = "failed"
+                print("Got bad command, dnl without params or no such file.")
+
             else:
+                print("User downloading...")
+
                 f = open(args[0], 'rb')
                 content = f.read()
                 f.close()
@@ -175,6 +212,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                 reply = f'{file_size}\n{file_hash}'
                 port = str(self.transport.get_extra_info('peername')[1])
                 self.download_cache[port] = content
+
         elif(cmd == 'upl'):
             reply = "Upload file..."
         else:
@@ -280,8 +318,9 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         password_success = self.check_password(username, password)
         timestamp_success = self.check_timestamp(int(timestamp)) #timestamp received as string
         if not password_success or not timestamp_success:
-            print("asdf")
+            #Check functions print someting if one of them failes, no need to print here
             return "failed"
+
         #Login Response
         client_rnd = splits[3]
         rn = np.random.bytes(6)
