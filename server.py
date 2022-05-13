@@ -116,6 +116,10 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         peername = transport.get_extra_info('peername')
         print('Connection from {}'.format(peername))
         self.transport = transport
+    
+    def connection_lost(self, exc):
+        self.client_logged_in = False
+        print('The client closed the connection')
 
     def create_command_reply(self,cmd):  # NOTE(mark): maybe create a utility class for this
         cmd = cmd.split('\n')
