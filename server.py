@@ -44,9 +44,9 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     # TODO(mark): create a user dict, where we store their caches and sqn to defend against replay attacks. This could also solve the problem with repeated logins
     #connections = { 'alice' : (0, 0, 0), 'bob' : (0,0,0), 'charlie' : (0,0,0)}
 
-    user_dictionary = { 'alice' :   { 'peername' : 0, 'hashed password' : 0, 'random salt' : 0, 'last_received_sequence_number': 0, 'upload_cache' : {}, 'download_cache' : {} },
-                        'bob' :     { 'peername' : 0, 'hashed password' : 0, 'random salt' : 0, 'last_received_sequence_number': 0, 'upload_cache' : {}, 'download_cache' : {} },
-                        'charlie' : { 'peername' : 0, 'hashed password' : 0, 'random salt' : 0, 'last_received_sequence_number': 0, 'upload_cache' : {}, 'download_cache' : {} }}
+    user_dictionary = { 'alice' :   { 'peername' : 0, 'hashed password' : 0, 'random salt' : 0, 'last_received_sequence_number': 0, 'logged in' : False },
+                        'bob' :     { 'peername' : 0, 'hashed password' : 0, 'random salt' : 0, 'last_received_sequence_number': 0, 'logged in' : False },
+                        'charlie' : { 'peername' : 0, 'hashed password' : 0, 'random salt' : 0, 'last_received_sequence_number': 0, 'logged in' : False }}
 
     #Cached login requests is a dictionary with usernames, that sent login requests
     #in every login handle, Server iterates through this dictionary and deletes those that are older than time_window
@@ -324,6 +324,10 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         timestamp = splits[0]
         username = splits[1]
         password = splits[2]
+
+        #Store last received sequence number
+        self.user_dictionary[username]['last_received_sequence_number'] = message[1]
+
         #client random not retrieved from splits, because it has been processed before and can be found in message[2]
         print("Received this login credentials: ",username, " ", password)
 
@@ -411,14 +415,29 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     #----In Encrypter class
     #def decode_data(self, message)
 
+    #Get user by active peername
+    def get_username(self, peername):
+        for user in self.user_dictionary:
+             if self.user_dictionary[user]['peername'] == peername:
+                return user
+        return "Not active"
+
     def data_received(self, data):
+        #Getting last received sequence number
+        peername = self.transport.get_extra_info('peername')
+        username = self.get_username(peername)
+        if username == "Not active":
+            l_sqn = 0
+        else:
+            l_sqn = self.user_dictionary[username]['last_received_sequence_number']
+
         #If first 2 bytes are not the communication protocol version number, we don't process it, but print it for debug
         if data[:2] != CP.versionNumber:
             print("Received not valid message, message dropped:")
             print(data)
 
         #Check sequence number
-        elif not int.from_bytes(data[6:8], "big") > self.last_received_sequence_number:
+        elif not int.from_bytes(data[6:8], "big") > l_sqn:
             print("Received wrong sequence number, message dropped:")
 
 
@@ -434,8 +453,6 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
             #Check if message could be processed
             if info != "failed":
                 self.sequence_number += 1
-                #Store last received sequence number
-                self.last_received_sequence_number = message[1]
 
                 #Check message type, and handle message accordingly
                 typ = message[0]
@@ -465,6 +482,11 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
                         self.transport.close()
                         return
                 else:
+
+                    #Store last received sequence number
+                    peername = self.transport.get_extra_info('peername')
+                    username = self.get_username(peername)
+                    self.user_dictionary[username]['last_received_sequence_number'] = message[1]
 
                     #Command
                     if typ == 'commandReq':
