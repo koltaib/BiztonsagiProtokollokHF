@@ -42,7 +42,11 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     #------ random salt: for every password, a random number is generated as salt, stored for authentication
 
     # TODO(mark): create a user dict, where we store their caches and sqn to defend against replay attacks. This could also solve the problem with repeated logins
-    connections = { 'alice' : (0, 0, 0), 'bob' : (0,0,0), 'charlie' : (0,0,0)}
+    #connections = { 'alice' : (0, 0, 0), 'bob' : (0,0,0), 'charlie' : (0,0,0)}
+
+    user_dictionary = { 'alice' :   { 'peername' : 0, 'hashed password' : 0, 'random salt' : 0, 'last_received_sequence_number': 0, 'upload_cache' : {}, 'download_cache' : {} },
+                        'bob' :     { 'peername' : 0, 'hashed password' : 0, 'random salt' : 0, 'last_received_sequence_number': 0, 'upload_cache' : {}, 'download_cache' : {} },
+                        'charlie' : { 'peername' : 0, 'hashed password' : 0, 'random salt' : 0, 'last_received_sequence_number': 0, 'upload_cache' : {}, 'download_cache' : {} }}
 
     #Cached login requests is a dictionary with usernames, that sent login requests
     #in every login handle, Server iterates through this dictionary and deletes those that are older than time_window
@@ -68,26 +72,27 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         hashed_password = scrypt.hash(password, random_salt)
 
         #Store random salt and hashed password in connections dictionary
-        self.connections[username] = ("", hashed_password, random_salt)
+        self.user_dictionary[username]["hashed password"] = hashed_password
+        self.user_dictionary[username]["random salt"] = random_salt
         return
 
     def check_password(self, username, password):
 
         #Check if user exists
-        if self.connections.get(username, 'Not found') == 'Not found':
+        if self.user_dictionary.get(username, 'Not found') == 'Not found':
             print("Unsuccessful login, no such user.")
             return False
         else:
-            #Get stored userdata
-            userdata = self.connections[username]
+            #Get stored userdata (userdata is a dictionary)
+            userdata = self.user_dictionary[username]
 
             #Get stored salt and hash received password with it
-            salt = userdata[2]
+            salt = userdata['random salt']
             #Hash password with stored salt
             hashed_password = scrypt.hash(password, salt)
 
             #Compare with stored hashed password
-            stored_hashed_password = userdata[1]
+            stored_hashed_password = userdata['hashed password']
 
             if hashed_password != stored_hashed_password:
                 #Password Not Ok
@@ -320,6 +325,9 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         if not password_success or not timestamp_success:
             #Check functions print someting if one of them failes, no need to print here
             return "failed"
+
+        #Successful login
+        self.user_dictionary[username]['peername'] = self.transport.get_extra_info('peername')
 
         #Login Response
         client_rnd = splits[3]
