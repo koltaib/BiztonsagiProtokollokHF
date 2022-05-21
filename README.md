@@ -1,4 +1,6 @@
-# BiztonsagiProtokollokHF
+# Server-client
+Homework for Cryptographic Protocols class. Task description is in "SiFT v1.0 protocol.md".
+
 A server and a client, communicating on MTP protocol, using encryption and authentication specified in "SiFT v1.0 protocol.md" task description.
 
 ## Parameters
