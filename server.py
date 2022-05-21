@@ -13,7 +13,7 @@ import time
 import os
 import math
 
-host = '127.0.0.1'
+host = '10.71.0.180'
 port = 5150
 CP = ComProt()
 
@@ -25,7 +25,7 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
     sequence_number = 1
     last_received_sequence_number = 0
 
-    time_window = 2e9
+    time_window = 2e9 *60
     rsakey = 0
     key = 0
 
@@ -443,6 +443,48 @@ class EchoServerProtocol(asyncio.Protocol, Encrypter):
         if data[:2] != CP.versionNumber:
             print("Received not valid message, message dropped:")
             print(data)
+
+        #Deal with download before everything else, because messages can be sent in a row, multiple messages in socket
+        typ_bytes = data[2:4]
+        typ = CP.getfield(typ_bytes)
+        if typ == "":
+            print("Error: Type field is empty")
+        if "uploadReq" in typ:
+            messages = []
+            ln = int.from_bytes(data[4:6], 'big')
+            first_message = data[:ln]
+            if len(first_message) != ln:
+                return
+            messages.append(first_message)
+            more_messages = True
+
+            ln_prev_messages = ln
+            while more_messages:
+                #If there are more messages
+
+                if len(data[ln_prev_messages:]) != 0:
+                    #Getting length of message i
+                    ln_i = int.from_bytes(data[ln_prev_messages:][4:6], "big")
+
+
+                    #Appending next message to messages
+                    current_message = data[ln_prev_messages:ln_prev_messages+ln_i]
+
+                    if len(current_message) == ln_i:
+                        messages.append(current_message)
+                    else:
+                        break
+                    #Updating length of previous messages
+                    ln_prev_messages += ln_i
+                    #print("Another message was ", ln_i, " long.")
+                else:
+                    more_messages = False
+
+            for m in messages:
+#                print(m[:16])
+                _, processed_msg = CP.processMessage(m)
+                self.handle_upl(processed_msg)
+            return
 
         #Check sequence number
         elif not int.from_bytes(data[6:8], "big") > l_sqn:

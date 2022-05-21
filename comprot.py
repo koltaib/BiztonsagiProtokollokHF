@@ -34,7 +34,7 @@ class ComProt():
         ln = message[4:6]
         if len(message).to_bytes(2,'big') != ln:
             print("\n FAILED MESSAGE PROCESS")
-            print("----- Lengths don't match: ", ln, len(message))
+            print("----- Lengths don't match: ", int.from_bytes(ln, "big"), len(message))
             print("----- Message not processed")
             #return ("failed","")
 
